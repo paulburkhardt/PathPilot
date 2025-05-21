@@ -1,7 +1,7 @@
 import time
 from typing import Dict, Any, List
 
-class WarningSystem:
+class WarningGenerator:
     def __init__(self, config: Dict[str, Any]):
         self.message_template = config['message_template']
         self.min_warning_interval = config['min_warning_interval']

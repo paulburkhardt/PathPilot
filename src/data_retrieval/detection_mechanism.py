@@ -2,7 +2,7 @@ import numpy as np
 from typing import Dict, Any, List, Tuple
 
 
-class DistanceCalculator:
+class DetectionMechanism:
     def __init__(self, config: Dict[str, Any]):
         self.warning_threshold = config['warning_threshold']
         self.update_frequency = config['update_frequency']

@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict, Any
 
-class SLAMProcessor:
+class MaSt3RProcessor:
     def __init__(self, config: Dict[str, Any]):
         self.min_points = config['min_points']
         self.max_depth = config['max_depth']

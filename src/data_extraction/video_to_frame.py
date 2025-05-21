@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-class VideoProcessor:
+class VideoToFrame:
     def __init__(self, config):
         self.fps = config['fps']
         self.resolution = tuple(config['resolution'])
