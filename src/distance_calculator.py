@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Dict, Any, List, Tuple
 
+
 class DistanceCalculator:
     def __init__(self, config: Dict[str, Any]):
         self.warning_threshold = config['warning_threshold']
