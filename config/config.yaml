@@ -1,0 +1,32 @@
+# Video Processing
+video:
+  fps: 30
+  resolution: [640, 480]
+
+# SLAM Settings
+slam:
+  min_points: 100
+  max_depth: 10.0  # meters
+  confidence_threshold: 0.7
+
+# Segmentation Settings
+segmentation:
+  model_type: "vit_h"  # SAM-B model type
+  device: "cuda"  # or "cpu"
+  confidence_threshold: 0.5
+
+# Distance Calculation
+distance:
+  warning_threshold: 0.3  # meters
+  update_frequency: 1.0  # seconds
+
+# BLIP-2 Settings
+vlm:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  device: "cuda"  # or "cpu"
+  max_length: 50
+
+# Warning System
+warning:
+  message_template: "Watch out: there is something {distance:.1f} meters in front of you"
+  min_warning_interval: 2.0  # seconds 
