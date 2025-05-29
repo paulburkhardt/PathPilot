@@ -1,0 +1,3 @@
+[submodule "sam-vit-base"]
+	path = sam-vit-base
+	url = https://huggingface.co/facebook/sam-vit-base

@@ -2,6 +2,7 @@
 __pycache__/
 models/*
 data/*
+.vscode
 
 !models/.gitkeep
 !data/.gitkeep
