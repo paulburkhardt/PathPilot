@@ -1,0 +1,3 @@
+[submodule "MASt3R-SLAM"]
+	path = MASt3R-SLAM
+	url = https://github.com/rmurai0610/MASt3R-SLAM.git
