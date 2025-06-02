@@ -3,7 +3,7 @@ import torch
 from segment_anything import sam_model_registry, SamPredictor
 from typing import Dict, Any, List
 
-class SegmentationProcessor:
+class SAMProcessor:
     def __init__(self, config: Dict[str, Any]):
         self.model_type = config['model_type']
         self.device = config['device']
