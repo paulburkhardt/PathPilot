@@ -5,3 +5,14 @@ data/*
 
 !models/.gitkeep
 !data/.gitkeep
+
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp
+*.ico
+*.svg
+*.eps
