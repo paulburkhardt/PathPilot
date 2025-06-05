@@ -1,0 +1,10 @@
+pipeline:
+    components:
+        - type: VideoDataLoader
+          config:
+            video_path: data/sample.mp4
+        - type: MAST3RSLAMComponent
+          config: {}
+        - type: PointCloudDataWriter
+          config:
+            output_dir: outputs/
