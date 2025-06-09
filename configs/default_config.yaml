@@ -4,7 +4,10 @@ pipeline:
           config:
             video_path: data/test_video_1.mp4
         - type: MAST3RSLAMComponent
-          config: {}
+          config: {
+            img_height: 480,
+            img_width: 680
+          }
         - type: PointCloudDataWriter
           config:
             output_dir: outputs/
