@@ -2,7 +2,7 @@ pipeline:
     components:
         - type: VideoDataLoader
           config:
-            video_path: data/sample.mp4
+            video_path: data/test_video_1.mp4
         - type: MAST3RSLAMComponent
           config: {}
         - type: PointCloudDataWriter
