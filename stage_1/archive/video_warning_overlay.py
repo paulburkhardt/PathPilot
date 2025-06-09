@@ -11,6 +11,7 @@ import open3d as o3d
 from scipy.spatial.distance import cdist
 import os
 from datetime import datetime
+import rerun as rr
 
 print("="*60)
 print("    PathPilot Video Warning Overlay System")
@@ -90,39 +91,16 @@ print()
 print("📏 STEP 3: Pre-calculating distances...")
 
 def calculate_min_distance_to_pointcloud(position, pointcloud):
-    """Calculate minimum distance from position to point cloud accounting for person height and excluding floor"""
+    """Calculate minimum distance from position to point cloud"""
     if len(pointcloud) == 0:
         return float('inf'), None
     
-    # Person height threshold (1.80m)
-    person_height = 1.80
-    
-    # Floor height threshold - filter out points that are likely floor
-    # Assuming floor is around z=0, we'll exclude points below a small threshold
-    floor_threshold = 0.1  # 10cm above floor level
-    
-    # Filter out floor points
-    non_floor_points = pointcloud[pointcloud[:, 2] > floor_threshold]
-    
-    if len(non_floor_points) == 0:
-        return float('inf'), None  # No obstacles above floor level
-    
-    # Extract position coordinates
-    x, y, z = position
-    
-    # If trajectory point is below person height, only consider horizontal distance
-    if z <= person_height:
-        # Use only x,y coordinates for distance calculation
-        position_2d = np.array([x, y])
-        pointcloud_2d = non_floor_points[:, :2]  # Only x,y coordinates from filtered point cloud
-        distances = cdist([position_2d], pointcloud_2d, metric='euclidean')[0]
-    else:
-        # For points above person height, use full 3D distance
-        distances = cdist([position], non_floor_points, metric='euclidean')[0]
+    # Calculate distances to all points in the cloud
+    distances = cdist([position], pointcloud, metric='euclidean')[0]
     
     min_distance = np.min(distances)
     closest_point_idx = np.argmin(distances)
-    closest_point = non_floor_points[closest_point_idx]
+    closest_point = pointcloud[closest_point_idx]
     
     return min_distance, closest_point
 
@@ -273,7 +251,7 @@ def draw_warning_overlay(frame, warning_info, frame_time):
     # Blend overlay with original frame
     alpha = 0.8 if level in ['DANGER', 'WARNING'] else 0.6
     result = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
-    
+
     return result
 
 print("✅ Video processing functions ready")
@@ -284,143 +262,7 @@ print()
 # ============================================================================
 print("🎬 STEP 5: Processing video with warning overlays...")
 
-def create_visualization_frame(trajectory_warnings, chair_points, current_time, frame_size=(800, 600)):
-    """Create a top-down view visualization frame showing trajectory and closest points"""
-    
-    # Create a blank frame
-    frame = np.zeros((frame_size[1], frame_size[0], 3), dtype=np.uint8)
-    
-    # Get current warning info
-    warning_info = get_warning_for_time(current_time, trajectory_warnings)
-    
-    if warning_info is None:
-        return frame
-    
-    current_position = warning_info['position']
-    closest_point = warning_info['closest_point']
-    level = warning_info['level']
-    distance = warning_info['distance']
-    
-    # Filter out floor points for visualization
-    floor_threshold = 0.1
-    non_floor_points = chair_points[chair_points[:, 2] > floor_threshold]
-    
-    # Calculate bounds for visualization
-    all_points = np.vstack([trajectory_data[:, 1:4], non_floor_points])
-    x_min, x_max = all_points[:, 0].min(), all_points[:, 0].max()
-    y_min, y_max = all_points[:, 1].min(), all_points[:, 1].max()
-    
-    # Add some padding
-    padding = 0.5
-    x_min -= padding
-    x_max += padding
-    y_min -= padding
-    y_max += padding
-    
-    # Scale to frame
-    x_scale = (frame_size[0] - 40) / (x_max - x_min)
-    y_scale = (frame_size[1] - 40) / (y_max - y_min)
-    scale = min(x_scale, y_scale)
-    
-    def world_to_screen(x, y):
-        screen_x = int((x - x_min) * scale + 20)
-        screen_y = int((y - y_min) * scale + 20)
-        return screen_x, screen_y
-    
-    # Draw point cloud (chair points)
-    for point in non_floor_points:
-        sx, sy = world_to_screen(point[0], point[1])
-        if 0 <= sx < frame_size[0] and 0 <= sy < frame_size[1]:
-            cv2.circle(frame, (sx, sy), 2, (100, 100, 100), -1)  # Gray points
-    
-    # Draw trajectory path
-    for i in range(len(trajectory_data) - 1):
-        p1 = trajectory_data[i]
-        p2 = trajectory_data[i + 1]
-        sx1, sy1 = world_to_screen(p1[1], p1[2])
-        sx2, sy2 = world_to_screen(p2[1], p2[2])
-        cv2.line(frame, (sx1, sy1), (sx2, sy2), (150, 150, 150), 1)
-    
-    # Draw current position
-    sx, sy = world_to_screen(current_position[0], current_position[1])
-    color = warning_colors[level]
-    cv2.circle(frame, (sx, sy), 8, color, -1)
-    cv2.circle(frame, (sx, sy), 12, (255, 255, 255), 2)
-    
-    # Draw closest point if it exists
-    if closest_point is not None:
-        closest_sx, closest_sy = world_to_screen(closest_point[0], closest_point[1])
-        cv2.circle(frame, (closest_sx, closest_sy), 6, (0, 255, 255), -1)  # Yellow
-        cv2.circle(frame, (closest_sx, closest_sy), 8, (255, 255, 255), 2)
-        
-        # Draw line between current position and closest point
-        cv2.line(frame, (sx, sy), (closest_sx, closest_sy), (0, 255, 255), 2)
-    
-    # Add text information
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    
-    # Title
-    cv2.putText(frame, "Top-Down View: Trajectory & Closest Points", (10, 25), 
-               font, 0.7, (255, 255, 255), 2)
-    
-    # Current info
-    info_y = frame_size[1] - 80
-    cv2.putText(frame, f"Time: {current_time:.2f}s", (10, info_y), 
-               font, 0.5, (255, 255, 255), 1)
-    cv2.putText(frame, f"Level: {level}", (10, info_y + 15), 
-               font, 0.5, color, 1)
-    cv2.putText(frame, f"Distance: {distance:.3f}m", (10, info_y + 30), 
-               font, 0.5, (255, 255, 255), 1)
-    
-    if closest_point is not None:
-        cv2.putText(frame, f"Closest Point: ({closest_point[0]:.2f}, {closest_point[1]:.2f}, {closest_point[2]:.2f})", 
-                   (10, info_y + 45), font, 0.4, (0, 255, 255), 1)
-    
-    # Legend
-    legend_x = frame_size[0] - 200
-    cv2.putText(frame, "Legend:", (legend_x, 30), font, 0.5, (255, 255, 255), 1)
-    cv2.circle(frame, (legend_x + 10, 45), 4, (100, 100, 100), -1)
-    cv2.putText(frame, "Chair points", (legend_x + 25, 50), font, 0.4, (255, 255, 255), 1)
-    cv2.circle(frame, (legend_x + 10, 65), 6, (0, 255, 0), -1)
-    cv2.putText(frame, "Current position", (legend_x + 25, 70), font, 0.4, (255, 255, 255), 1)
-    cv2.circle(frame, (legend_x + 10, 85), 4, (0, 255, 255), -1)
-    cv2.putText(frame, "Closest point", (legend_x + 25, 90), font, 0.4, (255, 255, 255), 1)
-    
-    return frame
-
-def create_visualization_video(output_path, trajectory_warnings, chair_points, fps=30.0):
-    """Create a visualization video showing trajectory and closest points"""
-    
-    frame_size = (800, 600)
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, frame_size)
-    
-    # Calculate video duration based on trajectory
-    max_time = max(w['timestamp'] for w in trajectory_warnings)
-    total_frames = int(max_time * fps)
-    
-    print(f"\n📊 Creating visualization video...")
-    print(f"   Duration: {max_time:.2f} seconds")
-    print(f"   Total frames: {total_frames}")
-    
-    for frame_num in range(total_frames):
-        current_time = frame_num / fps
-        
-        # Create visualization frame
-        vis_frame = create_visualization_frame(trajectory_warnings, chair_points, current_time, frame_size)
-        
-        # Write frame
-        out.write(vis_frame)
-        
-        # Progress indicator
-        if frame_num % 30 == 0:
-            progress = (frame_num / total_frames) * 100
-            print(f"  Visualization progress: {progress:.1f}%")
-    
-    out.release()
-    print(f"✅ Visualization video saved to: {output_path}")
-    
-    return True
+# Top-down visualization removed as requested
 
 def process_video_with_warnings(input_path, output_path, trajectory_warnings):
     """Process video and add warning overlays"""
@@ -484,32 +326,199 @@ def process_video_with_warnings(input_path, output_path, trajectory_warnings):
     
     return True
 
+
+def create_rerun_3d_visualization(trajectory_warnings, chair_points, output_name="pathpilot_3d_viz"):
+    """Create a 3D visualization using Rerun showing trajectory and closest points over time"""
+    
+    # Create output path for the .rrd file
+    output_path = f"./one_chair/{output_name}.rrd"
+    
+    # Initialize Rerun with web serving configuration
+    rr.init(output_name)
+    rr.serve_web()  # Use web server instead of saving to file
+    rr.save(output_path)  # Still save to file as backup
+    
+    print(f"\n🎯 Creating 3D Rerun visualization...")
+    print(f"   Starting web server for real-time viewing...")
+    print(f"   Also saving to file: {output_path}")
+    
+    # Log the complete point cloud data
+    if len(chair_points) > 0:
+        print(f"   Logging complete point cloud with {len(chair_points)} points...")
+        
+        # Create height-based coloring for better visualization
+        z_values = chair_points[:, 2]
+        z_min, z_max = z_values.min(), z_values.max()
+        z_range = z_max - z_min
+        
+        # Color points based on height: blue (low) to red (high)
+        colors = []
+        for z in z_values:
+            if z_range > 0:
+                normalized_height = (z - z_min) / z_range
+                # Create gradient from blue (floor) to brown (furniture) to red (high)
+                if normalized_height < 0.3:  # Lower points - bluish
+                    colors.append([int(100 + normalized_height * 155), int(100 + normalized_height * 155), 255])
+                elif normalized_height < 0.7:  # Middle points - brownish
+                    colors.append([139, 69, 19])
+                else:  # Higher points - reddish
+                    colors.append([255, int(100 - (normalized_height - 0.7) * 100), 0])
+            else:
+                colors.append([139, 69, 19])  # Default brown if no height variation
+        
+        rr.log(
+            "world/complete_pointcloud",
+            rr.Points3D(
+                positions=chair_points,
+                colors=colors,
+                radii=0.008,  # Slightly smaller for better visibility with many points
+            ),
+        )
+        
+        # Also log point cloud statistics
+        rr.log("pointcloud_stats/total_points", rr.Scalar(len(chair_points)))
+        rr.log("pointcloud_stats/height_range", rr.Scalar(z_range))
+        rr.log("pointcloud_stats/min_height", rr.Scalar(z_min))
+        rr.log("pointcloud_stats/max_height", rr.Scalar(z_max))
+        
+        # Log bounding box for reference
+        x_min, x_max = chair_points[:, 0].min(), chair_points[:, 0].max()
+        y_min, y_max = chair_points[:, 1].min(), chair_points[:, 1].max()
+        
+        # Create bounding box wireframe
+        bbox_corners = np.array([
+            [x_min, y_min, z_min], [x_max, y_min, z_min],
+            [x_max, y_max, z_min], [x_min, y_max, z_min],
+            [x_min, y_min, z_max], [x_max, y_min, z_max],
+            [x_max, y_max, z_max], [x_min, y_max, z_max]
+        ])
+        
+        # Define edges of bounding box
+        bbox_edges = [
+            # Bottom face
+            [bbox_corners[0], bbox_corners[1]], [bbox_corners[1], bbox_corners[2]],
+            [bbox_corners[2], bbox_corners[3]], [bbox_corners[3], bbox_corners[0]],
+            # Top face  
+            [bbox_corners[4], bbox_corners[5]], [bbox_corners[5], bbox_corners[6]],
+            [bbox_corners[6], bbox_corners[7]], [bbox_corners[7], bbox_corners[4]],
+            # Vertical edges
+            [bbox_corners[0], bbox_corners[4]], [bbox_corners[1], bbox_corners[5]],
+            [bbox_corners[2], bbox_corners[6]], [bbox_corners[3], bbox_corners[7]]
+        ]
+        
+        rr.log(
+            "world/bounding_box",
+            rr.LineStrips3D(
+                strips=bbox_edges,
+                colors=[128, 128, 128],  # Gray wireframe
+                radii=0.002,
+            ),
+        )
+    
+    # Log the complete trajectory path
+    trajectory_positions = np.array([w['position'] for w in trajectory_warnings])
+    rr.log(
+        "world/trajectory_path",
+        rr.LineStrips3D(
+            strips=[trajectory_positions],
+            colors=[150, 150, 150],  # Light gray
+            radii=0.005,
+        ),
+    )
+    
+    # Create timeline visualization (simplified)
+    print("   Logging timeline data...")
+    
+    for i, warning in enumerate(trajectory_warnings):
+        if i % 20 == 0:  # Log every 20th point to reduce load
+            print(f"   Processing {i+1}/{len(trajectory_warnings)}")
+        
+        timestamp = warning['timestamp']
+        position = warning['position']
+        closest_point = warning['closest_point']
+        level = warning['level']
+        distance = warning['distance']
+        
+        # Set timeline
+        rr.set_time_seconds("timeline", timestamp)
+        
+        # Color based on warning level
+        if level == 'DANGER':
+            person_color = [255, 0, 0]  # Red
+        elif level == 'WARNING':
+            person_color = [255, 165, 0]  # Orange
+        elif level == 'CAUTION':
+            person_color = [255, 255, 0]  # Yellow
+        else:
+            person_color = [0, 255, 0]  # Green
+        
+        # Log current person position
+        rr.log(
+            "world/person_position",
+            rr.Points3D(
+                positions=[position],
+                colors=[person_color],
+                radii=0.05,
+            ),
+        )
+        
+        # Log closest point if it exists
+        if closest_point is not None:
+            rr.log(
+                "world/closest_point",
+                rr.Points3D(
+                    positions=[closest_point],
+                    colors=[255, 255, 0],  # Yellow
+                    radii=0.03,
+                ),
+            )
+            
+            # Log connection line between person and closest point
+            rr.log(
+                "world/distance_line",
+                rr.LineStrips3D(
+                    strips=[np.array([position, closest_point])],
+                    colors=[255, 255, 0],  # Yellow
+                    radii=0.01,
+                ),
+            )
+        
+        # Log basic statistics only
+        rr.log("stats/distance", rr.Scalar(distance))
+        rr.log("stats/warning_level", rr.TextLog(f"Level: {level}"))
+    
+    print(f"✅ 3D Rerun visualization created!")
+    print(f"   🌐 Web server started - open browser to view live visualization")
+    print(f"   📁 File also saved to: {output_path}")
+    print(f"   💡 Alternative viewing: rerun {output_path}")
+    
+    return True
+
 # Process the video
 input_video = "../Data/Videos/one_chair.mp4"
-output_video = "./one_chair/one_chair_with_warnings_height_accounted.mp4"
-visualization_video = "./one_chair/one_chair_closest_points_visualization.mp4"
+output_video = "./one_chair/one_chair_with_warnings.mp4"
 
 # Create output directory if it doesn't exist
 os.makedirs(os.path.dirname(output_video), exist_ok=True)
 
-print("🎬 Creating two videos:")
+print("🎬 Creating visualizations:")
 print(f"   1. Warning overlay video: {output_video}")
-print(f"   2. Closest points visualization: {visualization_video}")
+print(f"   2. Interactive 3D Rerun visualization (web server)")
 print()
 
 # Create the warning overlay video
 success1 = process_video_with_warnings(input_video, output_video, trajectory_warnings)
 
-# Create the visualization video showing closest points
-success2 = create_visualization_video(visualization_video, trajectory_warnings, chair_points)
+# Create the 3D Rerun visualization
+success2 = create_rerun_3d_visualization(trajectory_warnings, chair_points, "pathpilot_chair_navigation_2")
 
 if success1 and success2:
     print()
     print("="*60)
-    print("✅ Both Videos Created Successfully!")
+    print("✅ All Visualizations Created Successfully!")
     print("="*60)
     print(f"📁 Warning overlay video: {output_video}")
-    print(f"📊 Closest points visualization: {visualization_video}")
+    print(f"🎯 Interactive 3D Rerun visualization: Web server started")
     print()
     
     # Generate summary statistics
@@ -545,6 +554,32 @@ if success1 and success2:
         print(f"   ⚠️  WARNING: {level_counts['DANGER']} danger situations in video")
     else:
         print(f"   ✅ SAFE: No immediate danger situations detected")
-        
+    
+    if success2:
+        print(f"\n🎯 3D Visualization Features:")
+        print(f"   • Complete point cloud visualization (ALL {len(chair_points)} points)")
+        print(f"   • Height-based color coding for better depth perception")
+        print(f"   • Bounding box wireframe for spatial reference")
+        print(f"   • Real-time person position tracking")
+        print(f"   • Closest point highlighting")
+        print(f"   • Dynamic distance measurements and warning levels")
+        print(f"   • Interactive timeline navigation")
+        print(f"   • Full 3D rotation and zoom capabilities")
+        print(f"   • Point cloud statistics panel")
+        print(f"\n🎮 Visualization Legend:")
+        print(f"   • Blue points = Lower/floor level points")
+        print(f"   • Brown points = Mid-level furniture points")
+        print(f"   • Red points = Higher elevation points")
+        print(f"   • Gray wireframe = Scene bounding box")
+        print(f"   • Gray line = Complete trajectory path")
+        print(f"   • Colored sphere = Person position (color = warning level)")
+        print(f"   • Yellow point = Current closest point")
+        print(f"   • Yellow line = Distance connection")
+        print(f"\n📊 Point Cloud Stats:")
+        print(f"   • Total points: {len(chair_points)}")
+        z_values = chair_points[:, 2]
+        print(f"   • Height range: {z_values.min():.3f}m to {z_values.max():.3f}m")
+        print(f"   • Point density: Enhanced visualization with height coloring")
+         
 else:
-    print("❌ Video processing failed!") 
+    print("❌ Visualization processing failed!")

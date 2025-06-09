@@ -14,9 +14,9 @@ def main():
     
     # Define paths to the Mast3r-Slam output files
     base_dir = pathlib.Path("plots/one_chair")
-    ply_file = base_dir / "one_chair.ply"
-    trajectory_file = base_dir / "one_chair.txt"
-    output_file = "one_chair_pathpilot.rrd"
+    ply_file = base_dir / "../one_chair.ply"
+    trajectory_file = base_dir / "../one_chair.txt"
+    output_file = "one_chair/one_chair_pathpilot.rrd"
     
     # Check if input files exist
     if not ply_file.exists():
@@ -43,8 +43,10 @@ def main():
         "--output", output_file,
         "--name", "OneChair_PathPilot",
         "--use-view-cone",  # Enable view cone filtering
-        "--cone-angle", "30",  # 60 degree half-angle (120 degree total)
-        "--max-view-distance", "5.0"  # 5 meter max view distance
+        "--cone-angle", "60",  # 60 degree half-angle (120 degree total)  
+        "--max-view-distance", "5.0",  # 5 meter max view distance
+        "--align-floor",  # Enable floor detection and alignment
+        "--floor-threshold", "0.05"  # 5cm threshold for floor detection
     ]
     
     print("Running PathPilot pipeline...")
