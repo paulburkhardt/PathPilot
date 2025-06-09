@@ -31,3 +31,33 @@ module load cuda/12.4.1
 ```
 python main.py --dataset ../Data/Videos/one_chair.mp4 --config config/base.yaml --no-viz --save-as ../../plots/one_chair
 ```
+
+
+## Run rerun
+
+Forward the port 9876 to your local machine
+
+Run rerun
+```
+rerun --serve-web
+```
+
+Open a new window -> in tmux for split screen
+
+```
+ctrl + b + %
+```
+
+Then run the "pipeline" in the other window
+
+```
+python demo_pathpilot.py
+```
+
+Visualize the results
+
+```
+rerun one_chair_pathpilot.rrd
+```
+
+The last recording is the one that is relevant.
