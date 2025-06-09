@@ -22,7 +22,11 @@ class PipelineDataBucket:
         "segmentation_mask",
         "object_data",
         "slam_data",
-        "camera_pose"
+        "camera_pose",
+        "timestamp",
+        "img_height",
+        "img_width",
+        "img_size"
     ]
     
     def __init__(self) -> None:
