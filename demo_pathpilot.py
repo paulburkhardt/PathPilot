@@ -41,7 +41,10 @@ def main():
         "--ply", str(ply_file),
         "--trajectory", str(trajectory_file),
         "--output", output_file,
-        "--name", "OneChair_PathPilot"
+        "--name", "OneChair_PathPilot",
+        "--use-view-cone",  # Enable view cone filtering
+        "--cone-angle", "30",  # 60 degree half-angle (120 degree total)
+        "--max-view-distance", "5.0"  # 5 meter max view distance
     ]
     
     print("Running PathPilot pipeline...")
