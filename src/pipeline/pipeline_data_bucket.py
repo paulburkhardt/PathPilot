@@ -24,7 +24,7 @@ class PipelineDataBucket:
         "point_cloud",
         "camera_pose",
         "timestamp",
-        
+        "calibration_K"
     ]
     
     def __init__(self) -> None:

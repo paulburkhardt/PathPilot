@@ -24,7 +24,7 @@ from mast3r_slam.config import load_config, config, set_global_config
 
 
 from src.pipeline.data_entities.image_data_entity import ImageDataEntity
-
+from src.pipeline.data_entities.point_cloud_data_entity import PointCloudDataEntity
 
 
 
@@ -201,7 +201,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
     @property
     def inputs_from_bucket(self) -> List[str]:
         """This component requires RGB images as input."""
-        return ["image","step_nr","timestamp","image_size","image_width","image_height"]
+        return ["image","step_nr","timestamp","image_size","image_width","image_height", "calibration_K"]
     
     @property
     def outputs_to_bucket(self) -> List[str]:
@@ -211,7 +211,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
     def _init_mast3r_slam(
             self,
             img_height:int,
-            img_width: int):
+            img_width: int,
+            calibration_K = None):
         """
         inits the stuff that is dataset parameter dependent
         """
@@ -222,12 +223,11 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         self.model = load_mast3r(device=self.device,path="MASt3R-SLAM/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth" )
         self.model.share_memory()
 
-
-        #TODO: Add option to use calibation. Maybe add calibration to data bucket
-        self.K = None
+        if calibration_K is not None:
+            self.keyframes.set_intrinsics(calibration_K)
 
         self.tracker = FrameTracker(self.model,self.keyframes,self.device)
-        self.backend = mp.Process(target=run_backend, args=(self.mast3r_config, self.model, self.states, self.keyframes, self.K))
+        self.backend = mp.Process(target=run_backend, args=(self.mast3r_config, self.model, self.states, self.keyframes, calibration_K))
         self.backend.start()
 
 
@@ -255,7 +255,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
              step_nr: int,
              image_size:int,
              image_width: int,
-             image_height: int) -> Dict[str, Any]:
+             image_height: int,
+             calibration_K: Any=None) -> Dict[str, Any]:
         """
         Process an RGB image using MAST3R SLAM.
 
@@ -266,6 +267,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             image_size: Size of the image (total number of pixels).
             image_width: Width of the image.
             image_height: Height of the image.
+            calibration_K: Camera Calibration matrix
 
         Returns:
             Dict[str, Any]: A dictionary containing the point cloud ("point_cloud") and camera pose ("camera_pose").
@@ -273,7 +275,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         
 
         if not self._is_inited:
-            self._init_mast3r_slam(img_height=image_height,img_width=image_width)
+            self._init_mast3r_slam(img_height=image_height,img_width=image_width,calibration_K=calibration_K)
             self._is_inited = True
 
         mode = self.states.get_mode()
@@ -331,12 +333,12 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                         break
                 time.sleep(0.01)
 
+        point_cloud = PointCloudDataEntity(
+            point_cloud=frame.X_canon,
+            confidence_scores=frame.C
+        )
 
-        if X_init is not None and C_init is not None:
-            X = X_init
-            C = C_init
-            
         return {
-            "point_cloud": X,
+            "point_cloud": point_cloud,
             "camera_pose": T_WC
         }
