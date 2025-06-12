@@ -7,6 +7,6 @@ pipeline:
         - type: MAST3RSLAMComponent
           config: 
             mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/calib.yaml"
-        - type: PointCloudDataWriter
-          config:
-            output_dir: outputs/
+        #- type: PointCloudDataWriter
+        #  config:
+        #    output_dir: outputs/

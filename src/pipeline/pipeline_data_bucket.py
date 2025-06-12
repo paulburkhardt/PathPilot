@@ -5,8 +5,7 @@ class PipelineDataBucket:
     A container class for passing data between pipeline components.
     
     Args:
-        step_nr: The current step number in the pipeline.
-    
+        -
     Returns:
         -
     
@@ -16,17 +15,16 @@ class PipelineDataBucket:
     
     __available_data_entities: List[str] = [
         "step_nr",
-        "rgb_image",
-        "depth_image",
+        
+        "image",
+        "image_height",
+        "image_width",
+        "image_size",
+
         "point_cloud",
-        "segmentation_mask",
-        "object_data",
-        "slam_data",
         "camera_pose",
         "timestamp",
-        "img_height",
-        "img_width",
-        "img_size"
+        
     ]
     
     def __init__(self) -> None:

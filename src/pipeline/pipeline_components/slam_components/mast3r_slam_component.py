@@ -23,9 +23,24 @@ from mast3r_slam.global_opt import FactorGraph
 from mast3r_slam.config import load_config, config, set_global_config
 
 
+from src.pipeline.data_entities.image_data_entity import ImageDataEntity
+
+
+
 
 
 def relocalization(frame, keyframes, factor_graph, retrieval_database):
+    """
+    Relocalization method of masterslam
+
+    Args:
+        -
+    Returns:
+        - 
+    Raises:
+        -
+    """
+    
     # we are adding and then removing from the keyframe, so we need to be careful.
     # The lock slows viz down but safer this way...
     with keyframes.lock:
@@ -72,6 +87,16 @@ def relocalization(frame, keyframes, factor_graph, retrieval_database):
 
 
 def run_backend(cfg, model, states, keyframes, K):
+    """
+    Backend method of masterslam
+
+    Args:
+        -
+    Returns:
+        -
+    Raises:
+        -
+    """
     set_global_config(cfg)
 
     device = keyframes.device
@@ -149,8 +174,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
     SLAM component implementing the MAST3R SLAM algorithm.
 
     Args:
-        img_height (int): The height of the input images.
-        img_width (int): The width of the input images.
+        mast3r_slam_config_path: Full path to the config of Mast3r Slam to use.
         device (str, optional): The device on which to run MAST3R SLAM. Defaults to "cuda:0".
     """
     
@@ -163,32 +187,28 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         super().__init__()
 
         self.mast3r_config = load_config(mast3r_slam_config_path)
-        
+        self.device = device
+        self._is_inited = False
+
+
         #prepare MAST3R Slam init based on their main
         mp.set_start_method("spawn")
         torch.backends.cuda.matmul.allow_tf32 = True
-        torch.set_grad_enabled(False)
-    
+        torch.set_grad_enabled(False)    
         self.manager = mp.Manager()
-        self.device = device
-
-
-        self._is_inited = False
-
         
 
     @property
     def inputs_from_bucket(self) -> List[str]:
         """This component requires RGB images as input."""
-        return ["rgb_image","step_nr","timestamp","img_size","img_width","img_height"]
+        return ["image","step_nr","timestamp","image_size","image_width","image_height"]
     
     @property
     def outputs_to_bucket(self) -> List[str]:
         """This component outputs point clouds and camera poses."""
         return ["point_cloud", "camera_pose"]
-    
 
-    def _init_rest(
+    def _init_mast3r_slam(
             self,
             img_height:int,
             img_width: int):
@@ -213,7 +233,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
 
     def __del__(self):
         """
-        Clean up on delete
+        Terminate the backend of masterslam on exit.
 
         Args:
             -
@@ -230,27 +250,30 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             self.backend.join()
 
     def _run(self, 
-             rgb_image: Any,
+             image: ImageDataEntity,
              timestamp: Any, 
              step_nr: int,
-             img_size:int,
-             img_width: int,
-             img_height: int) -> Dict[str, Any]:
+             image_size:int,
+             image_width: int,
+             image_height: int) -> Dict[str, Any]:
         """
         Process an RGB image using MAST3R SLAM.
-        
+
         Args:
-            rgb_image: The input RGB image
-            timestamp: Timestamp of the image within the video
-            step_nr: Frame number
-            
-        Raises:
-            NotImplementedError: As this is currently a placeholder
+            image: The input image.
+            timestamp: Timestamp of the image within the video.
+            step_nr: Frame number.
+            image_size: Size of the image (total number of pixels).
+            image_width: Width of the image.
+            image_height: Height of the image.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the point cloud ("point_cloud") and camera pose ("camera_pose").
         """
         
 
         if not self._is_inited:
-            self._init_rest(img_height=img_height,img_width=img_width)
+            self._init_mast3r_slam(img_height=image_height,img_width=image_width)
             self._is_inited = True
 
         mode = self.states.get_mode()
@@ -260,7 +283,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             if step_nr == 0
             else self.states.get_frame().T_WC
         )
-        frame = create_frame(step_nr, rgb_image, T_WC, img_size=img_size, device=self.device)
+        frame = create_frame(step_nr, image.as_numpy(), T_WC, img_size=image_size, device=self.device)
 
 
 
