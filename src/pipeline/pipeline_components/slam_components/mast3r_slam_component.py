@@ -6,11 +6,12 @@ if mast3r_slam_root not in sys.path:
     sys.path.insert(0, mast3r_slam_root)
 
 import time
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Literal
 from .abstract_slam_component import AbstractSLAMComponent
 import torch.multiprocessing as mp
 import torch
 import lietorch
+import numpy as np
 
 from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
 from mast3r_slam.mast3r_utils import (
@@ -21,6 +22,7 @@ from mast3r_slam.mast3r_utils import (
 from mast3r_slam.tracker import FrameTracker
 from mast3r_slam.global_opt import FactorGraph
 from mast3r_slam.config import load_config, config, set_global_config
+from mast3r_slam.geometry import constrain_points_to_ray
 
 
 from src.pipeline.data_entities.image_data_entity import ImageDataEntity
@@ -101,7 +103,7 @@ def run_backend(cfg, model, states, keyframes, K):
 
     device = keyframes.device
     factor_graph = FactorGraph(model, keyframes, K, device)
-    retrieval_database = load_retriever(model)
+    retrieval_database = load_retriever(model, retriever_path = "MASt3R-SLAM/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth")
 
     mode = states.get_mode()
     while mode is not Mode.TERMINATED:
@@ -174,20 +176,28 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
     SLAM component implementing the MAST3R SLAM algorithm.
 
     Args:
+        c_confidence_threshold: Confidence threshold above which points are output.
         mast3r_slam_config_path: Full path to the config of Mast3r Slam to use.
         device (str, optional): The device on which to run MAST3R SLAM. Defaults to "cuda:0".
     """
     
     def __init__(
         self,
+        point_cloud_method: Literal["accumulating", "refreshing"],
+        c_confidence_threshold: float,
         mast3r_slam_config_path: str, 
-        device: str = "cuda:0",
+        device: str = "cuda:0", 
         )->None:
 
         super().__init__()
 
-        self.mast3r_config = load_config(mast3r_slam_config_path)
+        load_config(mast3r_slam_config_path)
         self.device = device
+        self.c_confidence_threshold = c_confidence_threshold
+
+        assert point_cloud_method in ["accumulating", "refreshing"], "point_cloud_method must be either 'accumulating' or 'refreshing'"
+        self.point_cloud_method = point_cloud_method
+
         self._is_inited = False
 
 
@@ -227,7 +237,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             self.keyframes.set_intrinsics(calibration_K)
 
         self.tracker = FrameTracker(self.model,self.keyframes,self.device)
-        self.backend = mp.Process(target=run_backend, args=(self.mast3r_config, self.model, self.states, self.keyframes, calibration_K))
+        self.backend = mp.Process(target=run_backend, args=(config, self.model, self.states, self.keyframes, calibration_K))
         self.backend.start()
 
 
@@ -333,12 +343,75 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                         break
                 time.sleep(0.01)
 
-        point_cloud = PointCloudDataEntity(
-            point_cloud=frame.X_canon,
-            confidence_scores=frame.C
+
+
+
+
+
+        #project the keyframes onto the current pointcloud
+        
+        pointclouds = []
+        colors = []
+        confidence_scores = []
+
+        # variant 1: update the pointcloud merely with every keyframe
+        if self.point_cloud_method == "accumulating":
+            for i in range(len(self.keyframes)):
+                keyframe = self.keyframes[i]
+                if config["use_calib"]:
+                    X_canon = constrain_points_to_ray(
+                        keyframe.img_shape.flatten()[:2], keyframe.X_canon[None], keyframe.K
+                    )
+                    keyframe.X_canon = X_canon.squeeze(0)
+                pW = keyframe.T_WC.act(keyframe.X_canon).cpu().numpy().reshape(-1, 3)
+                color = (keyframe.uimg.cpu().numpy() * 255).astype(np.uint8).reshape(-1, 3)
+                score = keyframe.get_average_conf().cpu().numpy().astype(np.float32).reshape(-1)
+                valid = (
+                    keyframe.get_average_conf().cpu().numpy().astype(np.float32).reshape(-1)
+                    > self.c_confidence_threshold
+                )
+                pointclouds.append(pW[valid])
+                colors.append(color[valid])
+                confidence_scores.append(score[valid])
+            pointclouds = np.concatenate(pointclouds, axis=0)
+            colors = np.concatenate(colors, axis=0)
+            confidence_scores = np.concatenate(confidence_scores, axis=0)
+
+
+        #update the pointcloud with every frame, but only have parts of the color
+        elif self.point_cloud_method == "refreshing":
+
+            if config["use_calib"] and calibration_K is not None:
+                X_canon = constrain_points_to_ray(
+                    frame.img_shape.flatten()[:2], frame.X_canon[None], calibration_K
+                )
+                frame.X_canon = X_canon.squeeze(0)
+                
+            pW = T_WC.act(frame.X_canon).cpu().numpy().reshape(-1, 3)
+            color = (frame.uimg.cpu().numpy() * 255).astype(np.uint8).reshape(-1, 3)
+            score = frame.get_average_conf().cpu().numpy().astype(np.float32).reshape(-1)
+            valid = (
+                    frame.get_average_conf().cpu().numpy().astype(np.float32).reshape(-1)
+                    > self.c_confidence_threshold
+                )
+
+            pointclouds = pW
+            colors = color
+            confidence_scores = score
+
+        else: 
+            raise ValueError("Invalid variant")
+                
+
+
+
+        point_cloud_data_entity = PointCloudDataEntity(
+            point_cloud=pointclouds, #pointcloud in world coordinates
+            rgb= colors,
+            confidence_scores=confidence_scores
         )
 
         return {
-            "point_cloud": point_cloud,
+            "point_cloud": point_cloud_data_entity,
             "camera_pose": T_WC
         }
