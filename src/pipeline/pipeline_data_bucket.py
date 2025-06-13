@@ -50,7 +50,12 @@ class PipelineDataBucket:
         "view_cone_mask",
         "distances_array",
         "floor_distances_array",
-        "trajectory_summary"
+        "trajectory_summary",
+        
+        # Intermediate file paths for stage coordination
+        "point_cloud_path",
+        "trajectory_path",
+        "output_directory"
     ]
     
     def __init__(self) -> None:

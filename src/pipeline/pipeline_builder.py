@@ -11,6 +11,7 @@ from .pipeline_components.data_segmenters.floor_detection_component import Floor
 from .pipeline_components.object_extractors.closest_point_finder_component import ClosestPointFinderComponent
 from .pipeline_components.data_visualizer.point_cloud_data_vizualizer import PointCloudDataVisualizer
 from .pipeline_components.data_visualizer.camera_trajectory_vizualizer import CameraTrajectoryVisualizer
+from .pipeline_components.data_writers.slam_output_writer import SLAMOutputWriter
 
 class PipelineBuilder:
     """
@@ -39,6 +40,7 @@ class PipelineBuilder:
         "ClosestPointFinderComponent": ClosestPointFinderComponent,
         "PointCloudDataVisualizer": PointCloudDataVisualizer,
         "CameraTrajectoryVisualizer": CameraTrajectoryVisualizer,
+        "SLAMOutputWriter": SLAMOutputWriter,
         
         # Add other components here as they are implemented
     }

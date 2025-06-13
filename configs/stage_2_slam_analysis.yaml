@@ -1,0 +1,48 @@
+pipeline:
+  components:
+    # Load point cloud from PLY file saved by Stage 1
+    - type: PLYPointCloudLoader
+      config:
+        ply_path: "intermediate_outputs/slam_output_TIMESTAMP/slam_output.ply"  # Replace TIMESTAMP with actual timestamp
+        load_colors: true
+    
+    # Load camera trajectory from TXT file saved by Stage 1
+    - type: TrajectoryDataLoader
+      config:
+        trajectory_path: "intermediate_outputs/slam_output_TIMESTAMP/slam_output.txt"  # Replace TIMESTAMP with actual timestamp
+        validate_format: true
+    
+    # Detect floor plane from point cloud and camera poses
+    - type: FloorDetectionComponent
+      config:
+        sample_ratio: 0.1
+        ransac_threshold: 0.05
+        min_inliers: 1000
+        n_movement_poses: 10
+        floor_threshold: 0.05
+    
+    # Find closest points with optional view cone filtering
+    - type: ClosestPointFinderComponent
+      config:
+        use_view_cone: false  # Set to true to enable view cone filtering
+        cone_angle_deg: 90.0
+        max_view_distance: 10.0
+        use_floor_distance: true  # Calculate horizontal distances on floor plane
+    
+    # Visualize point cloud with floor highlighting
+    - type: PointCloudDataVisualizer
+      config:
+        enable_floor_visualization: true
+        floor_threshold: 0.05
+        grid_size: 2.0
+        highlight_floor_points: true
+    
+    # Visualize camera trajectory and closest point analysis
+    - type: CameraTrajectoryVisualizer
+      config:
+        show_trajectory_path: true
+        show_view_cones: false
+        cone_length_factor: 1.5
+        max_cone_length: 2.0
+        show_distance_lines: true
+        show_floor_analysis: true 
