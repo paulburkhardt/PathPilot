@@ -1,0 +1,5 @@
+inherit: "configs/MASt3R-SLAM_configs/base.yaml"
+
+use_calib: True
+dataset:
+  subsample: 2

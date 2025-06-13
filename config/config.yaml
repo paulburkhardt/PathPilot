@@ -30,5 +30,3 @@ vlm:
 warning:
   message_template: "Watch out: there is something {distance:.1f} meters in front of you"
   min_warning_interval: 2.0  # seconds 
-
-project_stage: 1

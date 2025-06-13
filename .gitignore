@@ -15,4 +15,7 @@ data/*
 *.webp
 *.ico
 *.svg
-*.eps
+*.eps.github/
+.vscode
+outputs/*
+data/*
