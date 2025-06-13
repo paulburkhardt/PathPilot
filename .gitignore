@@ -19,3 +19,7 @@ data/*
 .vscode
 outputs/*
 data/*
+*.ply
+*.rrd
+*.mp4
+*.txt
