@@ -24,7 +24,33 @@ class PipelineDataBucket:
         "point_cloud",
         "camera_pose",
         "timestamp",
-        "calibration_K"
+        "calibration_K",
+        
+        # Floor detection and coordinate system data entities
+        "floor_normal",
+        "floor_offset", 
+        "floor_threshold",
+        "floor_points",
+        "floor_grid",
+        
+        # Closest point analysis data entities
+        "closest_point_3d",
+        "closest_point_index",
+        "distance_3d",
+        "closest_point_floor",
+        "distance_floor",
+        "projected_point",
+        
+        # Camera trajectory data entities
+        "camera_positions",
+        "camera_quaternions",
+        "timestamps",
+        
+        # Analysis results
+        "view_cone_mask",
+        "distances_array",
+        "floor_distances_array",
+        "trajectory_summary"
     ]
     
     def __init__(self) -> None:

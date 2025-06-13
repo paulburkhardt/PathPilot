@@ -4,6 +4,14 @@ from .pipeline_components.slam_components.mast3r_slam_component import MAST3RSLA
 from .pipeline_components.data_writers.point_cloud_data_writer import PointCloudDataWriter
 from .pipeline_components.data_loaders.mast3r_slam_video_data_loader import MAST3RSLAMVideoDataLoader
 
+# Import new modular components
+from .pipeline_components.data_loaders.trajectory_data_loader import TrajectoryDataLoader
+from .pipeline_components.data_loaders.ply_point_cloud_loader import PLYPointCloudLoader
+from .pipeline_components.data_segmenters.floor_detection_component import FloorDetectionComponent
+from .pipeline_components.object_extractors.closest_point_finder_component import ClosestPointFinderComponent
+from .pipeline_components.data_visualizer.point_cloud_data_vizualizer import PointCloudDataVisualizer
+from .pipeline_components.data_visualizer.camera_trajectory_vizualizer import CameraTrajectoryVisualizer
+
 class PipelineBuilder:
     """
     Builder class for constructing Pipeline instances from configuration.
@@ -19,9 +27,19 @@ class PipelineBuilder:
     """
     
     COMPONENT_MAP = {
+        # Original components
         "MAST3RSLAMComponent": MAST3RSLAMComponent,
         "PointCloudDataWriter": PointCloudDataWriter,
-        "MAST3RSLAMVideoDataLoader": MAST3RSLAMVideoDataLoader
+        "MAST3RSLAMVideoDataLoader": MAST3RSLAMVideoDataLoader,
+        
+        # New modular components from process_slam_output.py
+        "TrajectoryDataLoader": TrajectoryDataLoader,
+        "PLYPointCloudLoader": PLYPointCloudLoader,
+        "FloorDetectionComponent": FloorDetectionComponent,
+        "ClosestPointFinderComponent": ClosestPointFinderComponent,
+        "PointCloudDataVisualizer": PointCloudDataVisualizer,
+        "CameraTrajectoryVisualizer": CameraTrajectoryVisualizer,
+        
         # Add other components here as they are implemented
     }
     
@@ -54,7 +72,8 @@ class PipelineBuilder:
                 raise ValueError(f"Unknown component type: {component_type}")
                 
             # Create component instance
-            component = component_class(**component_config.get("config"))
+            component_config_params = component_config.get("config", {})
+            component = component_class(**component_config_params)
             
             # Set component configuration
             component.config = component_config

@@ -10,7 +10,7 @@ salloc --nodes=1 --cpus-per-task=4 --mem=32G --gres=gpu:1,VRAM:24G --time=6:00:0
 conda activate mast3r-slam
 ```
 
-## Make sur that the correct cuda version is loaded
+## Make sure that the correct cuda version is loaded
 check cuda version and pytorch version
 ```
 nvidia-smi

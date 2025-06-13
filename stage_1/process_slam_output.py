@@ -886,14 +886,14 @@ def main():
         original_floor_normal = floor_normal.copy()
         original_floor_offset = floor_offset
         
-        # Transform coordinate system
-        points, positions, quaternions = transform_to_floor_coordinates(
-            points, positions, quaternions, floor_normal, floor_offset
-        )
+        # # Transform coordinate system
+        # points, positions, quaternions = transform_to_floor_coordinates(
+        #     points, positions, quaternions, floor_normal, floor_offset
+        # )
         
-        # After transformation, floor becomes XY plane at Z=0
-        floor_normal = np.array([0, 0, 1])  # Z-axis after transformation
-        floor_offset = 0.0
+        # # After transformation, floor becomes XY plane at Z=0
+        # floor_normal = np.array([0, 0, 1])  # Z-axis after transformation
+        # floor_offset = 0.0
         
         print("Floor-aligned coordinate system:")
         print(f"  - X, Y: Horizontal plane (floor)")
