@@ -2,6 +2,8 @@ from typing import List, Dict, Any
 from .pipeline_data_bucket import PipelineDataBucket
 from .pipeline_components.abstract_pipeline_component import AbstractPipelineComponent
 
+from tqdm import tqdm
+
 class Pipeline:
     """
     Main pipeline class that orchestrates the execution of pipeline components.
@@ -31,7 +33,7 @@ class Pipeline:
         Raises:
             ValueError: If a required input won't be available for any component
         """
-        available_outputs = set(["step_nr"])
+        available_outputs = set(["step_nr","total_steps"])
         
         for i, component in enumerate(self.components):
             missing_inputs = set(component.inputs_from_bucket) - available_outputs
@@ -55,11 +57,12 @@ class Pipeline:
         
         #pipeline assumes the first component within the pipeline to be iterable 
         iterator_component = self.components[0]
-        for i,data_entity in enumerate(iterator_component):
+        for i,data_entity in tqdm(enumerate(iterator_component),desc="Running pipeline",total=len(iterator_component)):
 
             bucket = PipelineDataBucket()
             bucket.put({
                 "step_nr": i,
+                "total_steps": len(iterator_component),
                 **data_entity  
             })
 

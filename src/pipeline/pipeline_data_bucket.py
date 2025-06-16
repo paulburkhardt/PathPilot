@@ -15,6 +15,7 @@ class PipelineDataBucket:
     
     __available_data_entities: List[str] = [
         "step_nr",
+        "total_steps",
         
         "image",
         "image_height",

@@ -9,6 +9,7 @@ pipeline:
             point_cloud_method: accumulating
             c_confidence_threshold: 1.0 
             mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/calib.yaml"
-        #- type: PointCloudDataWriter
-        #  config:
-        #    output_dir: outputs/
+        - type: PointCloudDataWriter
+          config:
+            output_dir: outputs/
+            only_save_last: True

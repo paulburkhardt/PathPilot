@@ -147,7 +147,7 @@ class MAST3RSLAMVideoDataLoader(AbstractDataLoader):
         load_config(self.mast3r_slam_config_path)
 
 
-        dataset = MAST3RSLAMVideoDataSet(
+        self.dataset = MAST3RSLAMVideoDataSet(
             self.video_path,
             self.calibration_config_path,
             device=self.device
@@ -157,7 +157,7 @@ class MAST3RSLAMVideoDataLoader(AbstractDataLoader):
 
 
 
-        self._dataloader = iter(dataset)
+        self._dataloader = iter(self.dataset)
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -169,6 +169,9 @@ class MAST3RSLAMVideoDataLoader(AbstractDataLoader):
         """This component outputs images."""
         return ["image","timestamp","image_size","image_width","image_height","calibration_K"]
     
+    def __len__(self):
+        return len(self.dataset)
+
     def _run(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         """
         Not used for data loaders as they are meant to be used as iterators.
