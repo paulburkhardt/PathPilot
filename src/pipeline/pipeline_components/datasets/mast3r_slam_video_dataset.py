@@ -4,7 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 import yaml
 import torch
 
-from .abstract_data_loader import AbstractDataLoader
+from .abstract_dataset import AbstractDataset
 from src.pipeline.data_entities.image_data_entity import ImageDataEntity
 
 # Add the MASt3r-SLAM root directory to sys.path if not already present
@@ -22,7 +22,7 @@ from mast3r_slam.config import load_config, config, set_global_config
 
 
 
-class MAST3RSLAMVideoDataSet(Dataset):
+class MAST3RSLAMVideoDataset(Dataset, AbstractDataset):
     """
     Dataset wrapper for the MasterSlam dataset.
 
@@ -36,9 +36,18 @@ class MAST3RSLAMVideoDataSet(Dataset):
         -
     """
 
-    def __init__(self, video_path: str,calibration_config_path:str = None,device: str = "cuda:0") -> None:
+    def __init__(self, 
+                 video_path: str,
+                 mast3r_slam_config_path:str,
+                 calibration_config_path:str = None,
+                 device: str = "cuda:0") -> None:
         
         self.device = device
+        self.mast3r_slam_config_path = mast3r_slam_config_path
+        
+        #load the masterslam config -> sets parameters globally
+        load_config(self.mast3r_slam_config_path)
+        
         self._dataset = load_dataset(video_path)
         self._dataset.subsample(config["dataset"]["subsample"])
         
@@ -67,11 +76,6 @@ class MAST3RSLAMVideoDataSet(Dataset):
             )
         else:
             self.K = None
-        
-        self._dataset_iter = iter(self._dataset)
-    
-
-
 
     def __len__(self) -> int:
         """
@@ -80,6 +84,30 @@ class MAST3RSLAMVideoDataSet(Dataset):
 
         return len(self._dataset)
     
+    @property
+    def inputs_from_bucket(self) -> List[str]:
+        """This component has no inputs as it's a data source."""
+        return []
+    
+    @property
+    def outputs_to_bucket(self) -> List[str]:
+        """This component outputs images."""
+        return ["image","timestamp","image_size","image_width","image_height","calibration_K"]
+
+    def _run(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """
+        Not used for data loaders as they are meant to be used as iterators.
+        
+        Args:
+            *args: Unused positional arguments
+            **kwargs: Unused keyword arguments
+        Raises:
+            NotImplementedError: Always, as this method should not be used
+        """
+        raise NotImplementedError(
+            "VideoDataset should not be called directly"
+        )
+
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         """
         Return the item from the internal dataset.
@@ -112,76 +140,3 @@ class MAST3RSLAMVideoDataSet(Dataset):
             "image_width": w,
             "calibration_K": self.K
             } 
-
-class MAST3RSLAMVideoDataLoader(AbstractDataLoader):
-    """
-    Data loader component for loading video frames from a master slam dataset
-    Not a real pytorch dataloader tho.
-    
-    Args:
-        video_path: Full path to the video to load
-        mast3r_slam_config_path: Full path to the config to use for MasterSlam incl. the dataset
-        calibration_conig_path: Full path to the config for the calibration of the camera
-        device: Device on which the data is loaded
-    Returns:
-        -
-    Raises:
-        NotImplementedError: When _run method is called
-    """
-    
-    def __init__(self, 
-                 video_path:str,
-                 mast3r_slam_config_path:str,
-                 calibration_config_path: str = None,
-                 device: str = "cuda:0"
-        ) -> None:
-
-        super().__init__()
-        self.video_path = video_path
-        self.mast3r_slam_config_path = mast3r_slam_config_path
-        self.calibration_config_path = calibration_config_path
-        self.device = device
-
-        
-        #load the masterslam config -> sets parameters globally
-        load_config(self.mast3r_slam_config_path)
-
-
-        self.dataset = MAST3RSLAMVideoDataSet(
-            self.video_path,
-            self.calibration_config_path,
-            device=self.device
-        )
-        
-        
-
-
-
-        self._dataloader = self.dataset #iter(self.dataset)
-    
-    @property
-    def inputs_from_bucket(self) -> List[str]:
-        """This component has no inputs as it's a data source."""
-        return []
-    
-    @property
-    def outputs_to_bucket(self) -> List[str]:
-        """This component outputs images."""
-        return ["image","timestamp","image_size","image_width","image_height","calibration_K"]
-    
-    def __len__(self):
-        return len(self.dataset)
-
-    def _run(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        """
-        Not used for data loaders as they are meant to be used as iterators.
-        
-        Args:
-            *args: Unused positional arguments
-            **kwargs: Unused keyword arguments
-        Raises:
-            NotImplementedError: Always, as this method should not be used
-        """
-        raise NotImplementedError(
-            "VideoDataLoader should not be called directly. Use it as an iterator instead."
-        )

@@ -1,13 +1,13 @@
 pipeline:
     components:
-        - type: MAST3RSLAMVideoDataLoader
+        - type: MAST3RSLAMVideoDataset
           config:
             video_path: MASt3R-SLAM/datasets/tum/rgbd_dataset_freiburg1_room/
             mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/calib.yaml"
         - type: MAST3RSLAMComponent
           config:
             point_cloud_method: accumulating
-            c_confidence_threshold: 1.0 
+            c_confidence_threshold: 1.5 
             mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/calib.yaml"
         - type: PointCloudDataWriter
           config:

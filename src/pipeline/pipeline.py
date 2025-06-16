@@ -56,13 +56,18 @@ class Pipeline:
         """
         
         #pipeline assumes the first component within the pipeline to be iterable 
-        iterator_component = self.components[0]
-        for i,data_entity in tqdm(enumerate(iterator_component),desc="Running pipeline",total=len(iterator_component)):
+        dataset_component = self.components[0]
+        #for i,data_entity in enumerate(iterator_component):
+#        for i,data_entity in tqdm(enumerate(iterator_component),desc="Running pipeline",total=len(iterator_component)):
+
+        for i in tqdm(range(len(dataset_component)), desc="Processing dataset"):
+
+            data_entity = dataset_component[i]
 
             bucket = PipelineDataBucket()
             bucket.put({
                 "step_nr": i,
-                "total_steps": len(iterator_component),
+                "total_steps": len(dataset_component),
                 **data_entity  
             })
 
