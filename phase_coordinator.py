@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-PathPilot Stage Coordinator
-Coordinates running the two-stage SLAM pipeline with automatic file path management.
+PathPilot phase Coordinator
+Coordinates running the two-phase SLAM pipeline with automatic file path management.
 
-Stage 1: MAST3R SLAM processing (video → point cloud + trajectory)
-Stage 2: SLAM analysis (point cloud + trajectory → visualization + analysis)
+phase 1: MAST3R SLAM processing (video → point cloud + trajectory)
+phase 2: SLAM analysis (point cloud + trajectory → visualization + analysis)
 """
 
 import argparse
@@ -32,13 +32,13 @@ def find_latest_slam_output(base_dir: str = "intermediate_outputs") -> tuple[str
     base_path = pathlib.Path(base_dir)
     
     if not base_path.exists():
-        raise FileNotFoundError(f"Output directory {base_dir} does not exist. Run Stage 1 first.")
+        raise FileNotFoundError(f"Output directory {base_dir} does not exist. Run phase 1 first.")
     
     # Find all slam_output_* directories
     slam_dirs = list(base_path.glob("slam_output_*"))
     
     if not slam_dirs:
-        raise FileNotFoundError(f"No SLAM output directories found in {base_dir}. Run Stage 1 first.")
+        raise FileNotFoundError(f"No SLAM output directories found in {base_dir}. Run phase 1 first.")
     
     # Sort by creation time (newest first)
     slam_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
@@ -66,12 +66,12 @@ def find_latest_slam_output(base_dir: str = "intermediate_outputs") -> tuple[str
     return ply_path, txt_path
 
 
-def update_stage2_config(config_path: str, ply_path: str, txt_path: str) -> str:
+def update_phase2_config(config_path: str, ply_path: str, txt_path: str) -> str:
     """
-    Update Stage 2 configuration with actual file paths.
+    Update phase 2 configuration with actual file paths.
     
     Args:
-        config_path: Path to Stage 2 configuration file
+        config_path: Path to phase 2 configuration file
         ply_path: Path to PLY file
         txt_path: Path to trajectory TXT file
         
@@ -91,21 +91,21 @@ def update_stage2_config(config_path: str, ply_path: str, txt_path: str) -> str:
     
     # Create updated config file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    updated_config_path = f"configs/stage_2_slam_analysis_updated_{timestamp}.yaml"
+    updated_config_path = f"configs/phase_2_slam_analysis_updated_{timestamp}.yaml"
     
     with open(updated_config_path, 'w') as f:
         yaml.dump(config, f, default_flow_style=False, indent=2)
     
-    print(f"Updated Stage 2 configuration saved to: {updated_config_path}")
+    print(f"Updated phase 2 configuration saved to: {updated_config_path}")
     return updated_config_path
 
 
-def run_stage(stage: int, config_path: str, dry_run: bool = False) -> bool:
+def run_phase(phase: int, config_path: str, dry_run: bool = False) -> bool:
     """
-    Run a pipeline stage.
+    Run a pipeline phase.
     
     Args:
-        stage: Stage number (1 or 2)
+        phase: phase number (1 or 2)
         config_path: Path to configuration file
         dry_run: If True, only show the command that would be run
         
@@ -115,7 +115,7 @@ def run_stage(stage: int, config_path: str, dry_run: bool = False) -> bool:
     cmd = ["python", "main.py", f"--config-name={pathlib.Path(config_path).stem}"]
     
     print(f"\n{'='*50}")
-    print(f"Running Stage {stage}")
+    print(f"Running phase {phase}")
     print(f"Configuration: {config_path}")
     print(f"Command: {' '.join(cmd)}")
     print(f"{'='*50}")
@@ -127,10 +127,10 @@ def run_stage(stage: int, config_path: str, dry_run: bool = False) -> bool:
     try:
         # Change to the directory containing main.py if needed
         result = subprocess.run(cmd, check=True, cwd=".")
-        print(f"\nStage {stage} completed successfully!")
+        print(f"\nphase {phase} completed successfully!")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"\nStage {stage} failed with error code {e.returncode}")
+        print(f"\nphase {phase} failed with error code {e.returncode}")
         return False
     except FileNotFoundError:
         print(f"\nError: Could not find main.py or python executable")
@@ -139,94 +139,94 @@ def run_stage(stage: int, config_path: str, dry_run: bool = False) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PathPilot Two-Stage SLAM Pipeline Coordinator")
-    parser.add_argument("--stage", type=int, choices=[1, 2], 
-                       help="Run specific stage (1: SLAM extraction, 2: analysis)")
-    parser.add_argument("--stage1-config", default="configs/stage_1_slam_extraction.yaml",
-                       help="Configuration file for Stage 1 (default: configs/stage_1_slam_extraction.yaml)")
-    parser.add_argument("--stage2-config", default="configs/stage_2_slam_analysis.yaml", 
-                       help="Configuration file for Stage 2 (default: configs/stage_2_slam_analysis.yaml)")
+    parser = argparse.ArgumentParser(description="PathPilot Two-phase SLAM Pipeline Coordinator")
+    parser.add_argument("--phase", type=int, choices=[1, 2], 
+                       help="Run specific phase (1: SLAM extraction, 2: analysis)")
+    parser.add_argument("--phase1-config", default="configs/phase_1_slam_extraction.yaml",
+                       help="Configuration file for phase 1 (default: configs/phase_1_slam_extraction.yaml)")
+    parser.add_argument("--phase2-config", default="configs/phase_2_slam_analysis.yaml", 
+                       help="Configuration file for phase 2 (default: configs/phase_2_slam_analysis.yaml)")
     parser.add_argument("--output-dir", default="intermediate_outputs",
                        help="Directory to search for intermediate outputs (default: intermediate_outputs)")
     parser.add_argument("--dry-run", action="store_true",
                        help="Show commands that would be run without executing them")
     parser.add_argument("--auto", action="store_true",
-                       help="Run both stages automatically")
+                       help="Run both phases automatically")
     
     args = parser.parse_args()
     
     # Validate configuration files exist
-    if args.stage in [None, 1] or args.auto:
-        if not pathlib.Path(args.stage1_config).exists():
-            print(f"Error: Stage 1 configuration file not found: {args.stage1_config}")
+    if args.phase in [None, 1] or args.auto:
+        if not pathlib.Path(args.phase1_config).exists():
+            print(f"Error: phase 1 configuration file not found: {args.phase1_config}")
             sys.exit(1)
     
-    if args.stage in [None, 2] or args.auto:
-        if not pathlib.Path(args.stage2_config).exists():
-            print(f"Error: Stage 2 configuration file not found: {args.stage2_config}")
+    if args.phase in [None, 2] or args.auto:
+        if not pathlib.Path(args.phase2_config).exists():
+            print(f"Error: phase 2 configuration file not found: {args.phase2_config}")
             sys.exit(1)
     
     try:
         if args.auto:
-            # Run both stages automatically
-            print("Running both stages automatically...")
+            # Run both phases automatically
+            print("Running both phases automatically...")
             
-            # Stage 1
-            success = run_stage(1, args.stage1_config, args.dry_run)
+            # phase 1
+            success = run_phase(1, args.phase1_config, args.dry_run)
             if not success:
-                print("Stage 1 failed. Aborting.")
+                print("phase 1 failed. Aborting.")
                 sys.exit(1)
             
             if not args.dry_run:
                 # Find the generated outputs
                 ply_path, txt_path = find_latest_slam_output(args.output_dir)
                 
-                # Update Stage 2 configuration
-                updated_config = update_stage2_config(args.stage2_config, ply_path, txt_path)
+                # Update phase 2 configuration
+                updated_config = update_phase2_config(args.phase2_config, ply_path, txt_path)
             else:
-                updated_config = args.stage2_config
+                updated_config = args.phase2_config
             
-            # Stage 2
-            success = run_stage(2, updated_config, args.dry_run)
+            # phase 2
+            success = run_phase(2, updated_config, args.dry_run)
             if not success:
-                print("Stage 2 failed.")
+                print("phase 2 failed.")
                 sys.exit(1)
                 
-        elif args.stage == 1:
-            # Run Stage 1 only
-            success = run_stage(1, args.stage1_config, args.dry_run)
+        elif args.phase == 1:
+            # Run phase 1 only
+            success = run_phase(1, args.phase1_config, args.dry_run)
             if not success:
                 sys.exit(1)
             
             if not args.dry_run:
-                print(f"\nStage 1 complete! To run Stage 2:")
-                print(f"python {sys.argv[0]} --stage 2")
+                print(f"\nphase 1 complete! To run phase 2:")
+                print(f"python {sys.argv[0]} --phase 2")
                 
-        elif args.stage == 2:
-            # Run Stage 2 only
+        elif args.phase == 2:
+            # Run phase 2 only
             if not args.dry_run:
                 # Find the latest outputs and update config
                 ply_path, txt_path = find_latest_slam_output(args.output_dir)
-                updated_config = update_stage2_config(args.stage2_config, ply_path, txt_path)
+                updated_config = update_phase2_config(args.phase2_config, ply_path, txt_path)
             else:
-                updated_config = args.stage2_config
+                updated_config = args.phase2_config
                 
-            success = run_stage(2, updated_config, args.dry_run)
+            success = run_phase(2, updated_config, args.dry_run)
             if not success:
                 sys.exit(1)
         else:
             # Show usage
-            print("PathPilot Two-Stage SLAM Pipeline")
+            print("PathPilot Two-phase SLAM Pipeline")
             print("=================================")
             print()
             print("Usage examples:")
-            print(f"  {sys.argv[0]} --auto                    # Run both stages automatically")
-            print(f"  {sys.argv[0]} --stage 1                # Run Stage 1 (SLAM extraction)")
-            print(f"  {sys.argv[0]} --stage 2                # Run Stage 2 (analysis)")
+            print(f"  {sys.argv[0]} --auto                    # Run both phases automatically")
+            print(f"  {sys.argv[0]} --phase 1                # Run phase 1 (SLAM extraction)")
+            print(f"  {sys.argv[0]} --phase 2                # Run phase 2 (analysis)")
             print(f"  {sys.argv[0]} --dry-run --auto         # Show what would be executed")
             print()
-            print("Stage 1: Video → SLAM processing → saves PLY + TXT files")
-            print("Stage 2: PLY + TXT files → floor detection + analysis + visualization")
+            print("phase 1: Video → SLAM processing → saves PLY + TXT files")
+            print("phase 2: PLY + TXT files → floor detection + analysis + visualization")
             print()
             print("Use --help for all available options")
     

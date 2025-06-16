@@ -1,15 +1,15 @@
 pipeline:
   components:
-    # Load point cloud from PLY file saved by Stage 1
+    # Load point cloud from PLY file saved by Phase 1
     - type: PLYPointCloudLoader
       config:
-        ply_path: "intermediate_outputs/slam_output_TIMESTAMP/slam_output.ply"  # Replace TIMESTAMP with actual timestamp
+        ply_path: "intermediate_outputs/slam_output_20250614_101228/slam_output.ply"  # Replace TIMESTAMP with actual timestamp
         load_colors: true
     
-    # Load camera trajectory from TXT file saved by Stage 1
+    # Load camera trajectory from TXT file saved by Phase 1
     - type: TrajectoryDataLoader
       config:
-        trajectory_path: "intermediate_outputs/slam_output_TIMESTAMP/slam_output.txt"  # Replace TIMESTAMP with actual timestamp
+        trajectory_path: "intermediate_outputs/slam_output_20250614_101228/slam_output.txt"  # Replace TIMESTAMP with actual timestamp
         validate_format: true
     
     # Detect floor plane from point cloud and camera poses
