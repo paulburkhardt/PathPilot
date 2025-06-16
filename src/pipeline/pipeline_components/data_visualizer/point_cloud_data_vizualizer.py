@@ -16,9 +16,11 @@ class PointCloudDataVisualizer(AbstractRerunDataVisualizer):
         NotImplementedError: As this is currently a placeholder
     """
     
-    def __init__(self) -> None:
+    def __init__(self,use_rgb_color: bool,use_confidence: bool) -> None:
         super().__init__()
-        self._point_cloud_visualizer: Dict[str, Any] = {}
+        self.use_rgb_color = use_rgb_color
+        self.use_confidence = use_confidence
+        
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -43,23 +45,30 @@ class PointCloudDataVisualizer(AbstractRerunDataVisualizer):
         colors = point_cloud.rgb_numpy
         confidence = point_cloud.confidence_scores_numpy
 
-        self.log_point_cloud(points, colors)
-        self.log_pointcloud_floor(points, colors,)
+        colors, radii = self.adjust_point_visuals(colors, confidence)
+
+        self.log_point_cloud(points, colors, radii)
+        #self.log_pointcloud_floor(points, colors,)
         return {}
     
- 
 
-    def log_point_cloud(self, points, colors,confidence):
+    def adjust_point_visuals(self,colors, confidence):
+        radii = 0.01
+        if self.use_confidence:
+            radii = (confidence * radii)
 
-        # TODO Add mode for vizualizing confidence
-        
-        if colors is not None:
-            rr.log("world/pointcloud", rr.Points3D(points, colors=colors), static=True)
-        else:
-            rr.log("world/pointcloud", rr.Points3D(points, colors=[128, 128, 128]), static=True)
+        point_colors = [128, 128, 128] #Gray
+        if colors is not None and self.use_colors is True:
+            point_colors = colors
+        return point_colors, radii
 
 
-    def log_pointcloud_floor(self, points, colors,config):
+    def log_point_cloud(self, points, colors, radii):
+
+        rr.log("world/pointcloud", rr.Points3D(points, colors=colors, radii = radii), static=True)
+
+
+    def log_pointcloud_floor(self, points, colors,config, radii):
         
         floor_offset    = config['floor_offset']
         floor_normal    = config['floor_normal']
@@ -75,7 +84,7 @@ class PointCloudDataVisualizer(AbstractRerunDataVisualizer):
             rr.log("world/floor_points", rr.Points3D(
                 floor_points, 
                 colors=[0, 255, 0],  # Bright green
-                radii=[0.01]
+                radii= radii
             ), static=True)
 
         floor_center = np.mean(points, axis=0)
@@ -119,3 +128,17 @@ class PointCloudDataVisualizer(AbstractRerunDataVisualizer):
 
 
 
+    def find_floor(self,point_cloud):
+        z_coordinates = point_cloud[:,2]
+        threshold = np.percentile(z_coordinates,15)
+        floor_points = point_cloud[z_coordinates < threshold]
+
+        center = np.mean(floor_points, axis=0)
+        centered_floor_points= floor_points -center
+
+        Covariance = centered_floor_points.T @ centered_floor_points / len(floor_points)
+        _, eigen_vec = np.linalg.eigh(Covariance)
+        floor_normal =  eigen_vec[:,0]
+        floor_normal/= np.linalg.norm(floor_normal)
+
+        

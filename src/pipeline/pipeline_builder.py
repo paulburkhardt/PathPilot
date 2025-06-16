@@ -3,6 +3,7 @@ from .pipeline import Pipeline
 from .pipeline_components.slam_components.mast3r_slam_component import MAST3RSLAMComponent
 from .pipeline_components.data_writers.point_cloud_data_writer import PointCloudDataWriter
 from .pipeline_components.data_loaders.mast3r_slam_video_data_loader import MAST3RSLAMVideoDataLoader
+from .pipeline_components.data_visualizer.point_cloud_data_vizualizer import PointCloudDataVisualizer
 
 class PipelineBuilder:
     """
@@ -21,7 +22,8 @@ class PipelineBuilder:
     COMPONENT_MAP = {
         "MAST3RSLAMComponent": MAST3RSLAMComponent,
         "PointCloudDataWriter": PointCloudDataWriter,
-        "MAST3RSLAMVideoDataLoader": MAST3RSLAMVideoDataLoader
+        "MAST3RSLAMVideoDataLoader": MAST3RSLAMVideoDataLoader,
+        "PointCloudDataVizualizer": PointCloudDataVisualizer
         # Add other components here as they are implemented
     }
     
