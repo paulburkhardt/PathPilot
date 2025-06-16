@@ -55,11 +55,8 @@ class Pipeline:
             -
         """
         
-        #pipeline assumes the first component within the pipeline to be iterable 
         dataset_component = self.components[0]
-        #for i,data_entity in enumerate(iterator_component):
-#        for i,data_entity in tqdm(enumerate(iterator_component),desc="Running pipeline",total=len(iterator_component)):
-
+        
         for i in tqdm(range(len(dataset_component)), desc="Processing dataset"):
 
             data_entity = dataset_component[i]
