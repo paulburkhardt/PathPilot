@@ -81,37 +81,19 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             inputs.append("point_cloud")
         if self.save_trajectory:
             inputs.extend(["camera_pose", "timestamp"])
+        if self.save_floor_data:
+            inputs.extend(["floor_normal", "floor_offset"])
+        if self.save_closest_points:
+            inputs.extend(["closest_point_3d", "distance_3d", "closest_point_floor", "distance_floor"])
         # Floor data and closest points are optional and will be handled via optional_inputs
             
         return inputs
     
-    @property
-    def optional_inputs_from_bucket(self) -> List[str]:
-        """This component can optionally use floor and closest point data."""
-        optional = []
-        
-        if self.save_floor_data:
-            optional.extend(["floor_normal", "floor_offset"])
-        if self.save_closest_points:
-            optional.extend(["closest_point_3d", "distance_3d", "closest_point_floor", "distance_floor"])
-            
-        return optional
     
     @property
     def outputs_to_bucket(self) -> List[str]:
         """This component outputs file paths for the next stage."""
-        outputs = ["output_directory"]
-        
-        if self.save_point_cloud:
-            outputs.append("point_cloud_path")
-        if self.save_trajectory:
-            outputs.append("trajectory_path")
-        if self.save_floor_data:
-            outputs.append("floor_data_path")
-        if self.save_closest_points:
-            outputs.append("closest_points_path")
-            
-        return outputs
+        return []
     
     def _setup_output_directory(self) -> None:
         """Set up the output directory structure."""
@@ -213,7 +195,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         # Save metadata
         self._save_metadata(results, step_nr)
         
-        return results
+        return {}
     
     def _accumulate_trajectory_data(self, camera_pose, timestamp, step_nr: int) -> None:
         """Accumulate trajectory data from individual frames."""
