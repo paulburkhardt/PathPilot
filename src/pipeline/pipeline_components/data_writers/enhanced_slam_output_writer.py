@@ -62,9 +62,9 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.accumulated_timestamps = []
         self.accumulated_positions = []
         self.accumulated_quaternions = []
-        self.accumulated_closest_points_3d = []
-        self.accumulated_closest_points_indices = []
-        self.accumulated_distances_3d = []
+        self.accumulated_n_closest_points_3d = []  # Now stores arrays of n points
+        self.accumulated_n_closest_points_indices = []  # Now stores arrays of n indices
+        self.accumulated_n_closest_points_distances = []  # Now stores arrays of n distances
         self.floor_data = None
         self.final_point_cloud = None
         
@@ -157,16 +157,20 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         # Accumulate closest point data
         if self.save_closest_points:
             if n_closest_points_3d is not None and n_closest_points_distance_2d is not None:
-                self.accumulated_closest_points_3d.append(
-                    n_closest_points_3d.tolist() if isinstance(n_closest_points_3d, np.ndarray) else n_closest_points_3d
-                )
-                self.accumulated_distances_3d.append(float(n_closest_points_distance_2d))
+                # Convert to numpy arrays if needed and ensure proper format
+                points_3d = np.array(n_closest_points_3d) if not isinstance(n_closest_points_3d, np.ndarray) else n_closest_points_3d
+                distances = np.array(n_closest_points_distance_2d) if not isinstance(n_closest_points_distance_2d, np.ndarray) else n_closest_points_distance_2d
+                indices = np.array(n_closest_points_index) if n_closest_points_index is not None and not isinstance(n_closest_points_index, np.ndarray) else n_closest_points_index
                 
-                # Store the index if provided
-                if n_closest_points_index is not None:
-                    self.accumulated_closest_points_indices.append(int(n_closest_points_index))
+                # Store the arrays of n closest points
+                self.accumulated_n_closest_points_3d.append(points_3d.tolist())
+                self.accumulated_n_closest_points_distances.append(distances.tolist())
+                
+                # Store the indices if provided
+                if indices is not None:
+                    self.accumulated_n_closest_points_indices.append(indices.tolist())
                 else:
-                    self.accumulated_closest_points_indices.append(None)
+                    self.accumulated_n_closest_points_indices.append(None)
         
         # Store the latest point cloud
         if self.save_point_cloud and point_cloud is not None:
@@ -189,7 +193,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             floor_path = self._save_floor_data()
             results["floor_data_path"] = str(floor_path)
         
-        if self.save_closest_points and len(self.accumulated_distances_3d) > 0:
+        if self.save_closest_points and len(self.accumulated_n_closest_points_distances) > 0:
             closest_path = self._save_closest_points_data()
             results["closest_points_path"] = str(closest_path)
         
@@ -319,14 +323,14 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         """Save closest point analysis data."""
         if self.analysis_format == 'json':
             data = {
-                "closest_points_3d": self.accumulated_closest_points_3d,
-                "closest_points_indices": self.accumulated_closest_points_indices,
-                "distances_3d": self.accumulated_distances_3d,
+                "n_closest_points_3d": self.accumulated_n_closest_points_3d,
+                "n_closest_points_indices": self.accumulated_n_closest_points_indices,
+                "n_closest_points_distances": self.accumulated_n_closest_points_distances,
                 "num_poses": len(self.accumulated_timestamps),
                 "analysis_summary": {
-                    "avg_n_closest_points_distance_2d": float(np.mean(self.accumulated_distances_3d)) if self.accumulated_distances_3d else None,
-                    "min_n_closest_points_distance_2d": float(np.min(self.accumulated_distances_3d)) if self.accumulated_distances_3d else None,
-                    "max_n_closest_points_distance_2d": float(np.max(self.accumulated_distances_3d)) if self.accumulated_distances_3d else None,
+                    "avg_n_closest_points_distance_2d": self._calculate_distance_stats("mean") if self.accumulated_n_closest_points_distances else None,
+                    "min_n_closest_points_distance_2d": self._calculate_distance_stats("min") if self.accumulated_n_closest_points_distances else None,
+                    "max_n_closest_points_distance_2d": self._calculate_distance_stats("max") if self.accumulated_n_closest_points_distances else None,
                 }
             }
             
@@ -337,13 +341,23 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             closest_path = self.final_output_dir / f"{self.output_name}_closest_points.csv"
             with open(closest_path, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['step', 'closest_3d_x', 'closest_3d_y', 'closest_3d_z', 'closest_point_index', 'n_closest_points_distance_2d'])
+                writer.writerow(['step', 'point_idx', 'closest_3d_x', 'closest_3d_y', 'closest_3d_z', 'closest_point_index', 'n_closest_points_distance_2d'])
                 
-                for i in range(len(self.accumulated_closest_points_3d)):
-                    pt3d = self.accumulated_closest_points_3d[i]
-                    index = self.accumulated_closest_points_indices[i] if i < len(self.accumulated_closest_points_indices) else None
-                    row = [i, pt3d[0], pt3d[1], pt3d[2], index, self.accumulated_distances_3d[i]]
-                    writer.writerow(row)
+                for step_i in range(len(self.accumulated_n_closest_points_3d)):
+                    points_3d = self.accumulated_n_closest_points_3d[step_i]
+                    distances = self.accumulated_n_closest_points_distances[step_i]
+                    indices = self.accumulated_n_closest_points_indices[step_i] if step_i < len(self.accumulated_n_closest_points_indices) else None
+                    
+                    # Handle single point or array of points
+                    if isinstance(points_3d[0], list):  # Array of n points
+                        for point_idx, (point, distance) in enumerate(zip(points_3d, distances)):
+                            index = indices[point_idx] if indices is not None else None
+                            row = [step_i, point_idx, point[0], point[1], point[2], index, distance]
+                            writer.writerow(row)
+                    else:  # Single point (backward compatibility)
+                        index = indices if indices is not None else None
+                        row = [step_i, 0, points_3d[0], points_3d[1], points_3d[2], index, distances]
+                        writer.writerow(row)
         
         return closest_path
     
@@ -419,7 +433,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "total_poses": len(self.accumulated_timestamps),
                 "trajectory_duration": (max(self.accumulated_timestamps) - min(self.accumulated_timestamps)) if len(self.accumulated_timestamps) > 1 else 0,
                 "has_floor_data": self.floor_data is not None,
-                "closest_points_3d_count": len(self.accumulated_distances_3d)
+                "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances)
             },
             "file_paths": results
         }
@@ -427,13 +441,41 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         if self.floor_data:
             metadata["floor_detection"] = self.floor_data
         
-        if len(self.accumulated_distances_3d) > 0:
+        if len(self.accumulated_n_closest_points_distances) > 0:
             metadata["distance_analysis"] = {
-                "avg_n_closest_points_distance_2d": float(np.mean(self.accumulated_distances_3d)),
-                "min_n_closest_points_distance_2d": float(np.min(self.accumulated_distances_3d)),
-                "max_n_closest_points_distance_2d": float(np.max(self.accumulated_distances_3d)),
-                "std_n_closest_points_distance_2d": float(np.std(self.accumulated_distances_3d))
+                "avg_n_closest_points_distance_2d": self._calculate_distance_stats("mean"),
+                "min_n_closest_points_distance_2d": self._calculate_distance_stats("min"),
+                "max_n_closest_points_distance_2d": self._calculate_distance_stats("max"),
+                "std_n_closest_points_distance_2d": self._calculate_distance_stats("std")
             }
         
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2) 
+
+    def _calculate_distance_stats(self, stat: str) -> float:
+        """Calculate distance statistics from arrays of n closest point distances."""
+        if not self.accumulated_n_closest_points_distances:
+            return None
+            
+        # Flatten all distance arrays into a single array
+        all_distances = []
+        for distances in self.accumulated_n_closest_points_distances:
+            if isinstance(distances, list):
+                all_distances.extend(distances)
+            else:
+                all_distances.append(distances)
+        
+        if not all_distances:
+            return None
+            
+        distances_array = np.array(all_distances)
+        
+        if stat == "mean":
+            return float(np.mean(distances_array))
+        elif stat == "min":
+            return float(np.min(distances_array))
+        elif stat == "max":
+            return float(np.max(distances_array))
+        elif stat == "std":
+            return float(np.std(distances_array))
+        return None 
