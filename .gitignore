@@ -16,7 +16,6 @@ data/*
 *.ico
 *.svg
 *.eps.github/
-.vscode
 outputs/*
 data/*
 *.ply

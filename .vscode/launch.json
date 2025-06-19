@@ -1,0 +1,85 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debugger: MASt3R_SLAM",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/MASt3R-SLAM/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/MASt3R-SLAM/",
+            "args": [
+                "--dataset", 
+                "datasets/tum/rgbd_dataset_freiburg1_room/", 
+                "--config", 
+                "config/calib.yaml",
+                "--no-viz"
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: MASt3R_SLAM (our video)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/MASt3R-SLAM/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/MASt3R-SLAM/",
+            "args": [
+                "--dataset", 
+                "/usr/prakt/s0124/AFM/PathPilot/data/test_video_1.mp4", 
+                "--config", 
+                "config/no_calib.yaml",
+                "--no-viz"
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: Main (default config)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config-name",
+                "default_config"
+            ],
+            "justMyCode": false
+        },
+        
+        {
+            "name": "Python Debugger: Main (stage 1 - our video)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config-name",
+                "stage_1_our_video"
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: Main (stage 1 - merged)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config-name",
+                "phase_1_incremental_slam_analysis_with_intermediate"
+            ],
+            "justMyCode": false
+        },
+    ]
+}
