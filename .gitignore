@@ -23,3 +23,4 @@ data/*
 *.mp4
 *.txt
 *.csv
+enhanced_slam_outputs/

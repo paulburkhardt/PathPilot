@@ -349,16 +349,11 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                     indices = self.accumulated_n_closest_points_indices[step_i] if step_i < len(self.accumulated_n_closest_points_indices) else None
                     
                     # Handle single point or array of points
-                    if isinstance(points_3d[0], list):  # Array of n points
-                        for point_idx, (point, distance) in enumerate(zip(points_3d, distances)):
-                            index = indices[point_idx] if indices is not None else None
-                            row = [step_i, point_idx, point[0], point[1], point[2], index, distance]
-                            writer.writerow(row)
-                    else:  # Single point (backward compatibility)
-                        index = indices if indices is not None else None
-                        row = [step_i, 0, points_3d[0], points_3d[1], points_3d[2], index, distances]
+                    for point_idx, (point, distance) in enumerate(zip(points_3d, distances)):
+                        index = indices[point_idx] if indices is not None else None
+                        row = [step_i, point_idx, point[0], point[1], point[2], index, distance]
                         writer.writerow(row)
-        
+                    
         return closest_path
     
     def _save_intermediate_results(self, step_nr: int) -> None:

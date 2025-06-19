@@ -69,7 +69,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         try:
             # For lietorch.Sim3, get the rotation matrix and extract forward direction
             # Camera typically looks in -Z direction in camera frame
-            rotation_matrix = camera_pose.rotation().matrix().cpu().numpy().reshape(3, 3)
+            rotation_matrix = camera_pose.matrix()[0,0:3,0:3].cpu().numpy().reshape(3, 3)
             # Forward direction is -Z in camera coordinates, transformed to world coordinates
             camera_forward = rotation_matrix @ np.array([0, 0, -1])
         except AttributeError:
@@ -181,7 +181,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         try:
             # Get the camera position in world coordinates
             # For lietorch.Sim3, we can access the translation part
-            camera_position = camera_pose.translation().cpu().numpy().reshape(3)
+            camera_position = camera_pose.translation()[:,0:3].cpu().numpy().reshape(3)
         except AttributeError:
             # Fallback: if it's a matrix, extract translation
             if hasattr(camera_pose, 'cpu'):
