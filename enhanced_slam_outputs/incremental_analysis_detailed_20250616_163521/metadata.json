@@ -1,0 +1,51 @@
+{
+  "generation_info": {
+    "generated": "2025-06-16T16:38:29.986460",
+    "final_step_number": 76,
+    "output_directory": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163521"
+  },
+  "configuration": {
+    "save_point_cloud": true,
+    "save_trajectory": true,
+    "save_floor_data": true,
+    "save_closest_points": true,
+    "save_intermediate": true,
+    "intermediate_interval": 10,
+    "analysis_format": "csv",
+    "output_name": "incremental_analysis_detailed"
+  },
+  "data_summary": {
+    "total_poses": 77,
+    "trajectory_duration": 0.6339666387665198,
+    "has_floor_data": true,
+    "closest_points_3d_count": 75,
+    "closest_points_floor_count": 75
+  },
+  "file_paths": {
+    "output_directory": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163521",
+    "point_cloud_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163521/incremental_analysis_detailed_pointcloud.ply",
+    "trajectory_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163521/incremental_analysis_detailed_trajectory.txt",
+    "floor_data_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163521/incremental_analysis_detailed_floor_data.csv",
+    "closest_points_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163521/incremental_analysis_detailed_closest_points.csv"
+  },
+  "floor_detection": {
+    "floor_normal": [
+      -0.010267738252878189,
+      0.9628596305847168,
+      0.2698071300983429
+    ],
+    "floor_offset": 1.4150241613388062,
+    "detection_step": 76,
+    "timestamp": 0.6339666387665198
+  },
+  "distance_analysis": {
+    "avg_distance_3d": 1.6523385486392428,
+    "min_distance_3d": 1.047543253092618,
+    "max_distance_3d": 1.8909842876090734,
+    "std_distance_3d": 0.2043967749553094,
+    "avg_distance_floor": 0.26602505360565,
+    "min_distance_floor": 0.059217647611839466,
+    "max_distance_floor": 0.3423813655487175,
+    "std_distance_floor": 0.07587848418335309
+  }
+}

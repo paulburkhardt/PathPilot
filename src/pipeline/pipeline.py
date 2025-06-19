@@ -23,6 +23,7 @@ class Pipeline:
     def validate(self) -> None:
         """
         Validate that all required inputs will be available for each component.
+        Optional inputs are not validated since they may become available later.
         
         Args:
             -
@@ -34,11 +35,16 @@ class Pipeline:
         available_outputs = set(["step_nr"])
         
         for i, component in enumerate(self.components):
-            missing_inputs = set(component.inputs_from_bucket) - available_outputs
+            required_inputs = set(component.inputs_from_bucket)
+            optional_inputs = set(component.optional_inputs_from_bucket)
+            
+            # Only check required inputs, not optional ones
+            missing_inputs = required_inputs - available_outputs
             if missing_inputs:
                 raise ValueError(
                     f"Component {i} ({component.__class__.__name__}) requires inputs {missing_inputs} "
-                    f"but they won't be available. Available outputs are {available_outputs}"
+                    f"but they won't be available. Available outputs are {available_outputs}. "
+                    f"Optional inputs {optional_inputs} are not checked during validation."
                 )
             
             available_outputs.update(component.outputs_to_bucket)
@@ -65,6 +71,14 @@ class Pipeline:
 
             for component in self.components[1:]:
 
-                inputs = bucket.get(*component.inputs_from_bucket)
+                # Get required inputs
+                required_inputs = component.inputs_from_bucket
+                optional_inputs = component.optional_inputs_from_bucket
+                
+                if optional_inputs:
+                    inputs = bucket.get_with_optional(required_inputs, optional_inputs)
+                else:
+                    inputs = bucket.get(*required_inputs)
+                    
                 outputs = component(**inputs)
                 bucket.put(outputs)

@@ -1,0 +1,51 @@
+{
+  "generation_info": {
+    "generated": "2025-06-16T16:49:03.722845",
+    "final_step_number": 226,
+    "output_directory": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163844"
+  },
+  "configuration": {
+    "save_point_cloud": true,
+    "save_trajectory": true,
+    "save_floor_data": true,
+    "save_closest_points": true,
+    "save_intermediate": true,
+    "intermediate_interval": 10,
+    "analysis_format": "csv",
+    "output_name": "incremental_analysis_detailed"
+  },
+  "data_summary": {
+    "total_poses": 227,
+    "trajectory_duration": 1.8852165837004407,
+    "has_floor_data": true,
+    "closest_points_3d_count": 225,
+    "closest_points_floor_count": 225
+  },
+  "file_paths": {
+    "output_directory": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163844",
+    "point_cloud_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163844/incremental_analysis_detailed_pointcloud.ply",
+    "trajectory_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163844/incremental_analysis_detailed_trajectory.txt",
+    "floor_data_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163844/incremental_analysis_detailed_floor_data.csv",
+    "closest_points_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_163844/incremental_analysis_detailed_closest_points.csv"
+  },
+  "floor_detection": {
+    "floor_normal": [
+      0.0017323408974334598,
+      0.9629811644554138,
+      0.26956331729888916
+    ],
+    "floor_offset": 1.4344993829727173,
+    "detection_step": 226,
+    "timestamp": 1.8852165837004407
+  },
+  "distance_analysis": {
+    "avg_distance_3d": 1.0923811456798138,
+    "min_distance_3d": 0.2555536808031197,
+    "max_distance_3d": 1.8909842876090734,
+    "std_distance_3d": 0.4368914680576006,
+    "avg_distance_floor": 0.09161058503857795,
+    "min_distance_floor": 0.00027515449245461,
+    "max_distance_floor": 0.35546469495338595,
+    "std_distance_floor": 0.13248560170827942
+  }
+}

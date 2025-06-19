@@ -55,6 +55,8 @@ class PipelineDataBucket:
         # Intermediate file paths for stage coordination
         "point_cloud_path",
         "trajectory_path",
+        "floor_data_path",
+        "closest_points_path",
         "output_directory"
     ]
     
@@ -90,3 +92,30 @@ class PipelineDataBucket:
             KeyError: If a requested key doesn't exist in the bucket.
         """
         return {key: self._data[key] for key in keys}
+    
+    def get_optional(self, *keys: str) -> Dict[str, Any]:
+        """
+        Retrieve data from the bucket, including only keys that exist.
+        
+        Args:
+            *keys: Variable number of keys to retrieve data for.
+        Returns:
+            Dictionary containing the requested data for keys that exist.
+        """
+        return {key: self._data[key] for key in keys if key in self._data}
+    
+    def get_with_optional(self, required_keys: List[str], optional_keys: List[str]) -> Dict[str, Any]:
+        """
+        Retrieve data from the bucket with both required and optional keys.
+        
+        Args:
+            required_keys: Keys that must be present.
+            optional_keys: Keys that are optional.
+        Returns:
+            Dictionary containing all available data.
+        Raises:
+            KeyError: If a required key doesn't exist in the bucket.
+        """
+        result = {key: self._data[key] for key in required_keys}
+        result.update({key: self._data[key] for key in optional_keys if key in self._data})
+        return result

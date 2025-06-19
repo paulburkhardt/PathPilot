@@ -7,11 +7,16 @@ from .pipeline_components.data_loaders.mast3r_slam_video_data_loader import MAST
 # Import new modular components
 from .pipeline_components.data_loaders.trajectory_data_loader import TrajectoryDataLoader
 from .pipeline_components.data_loaders.ply_point_cloud_loader import PLYPointCloudLoader
+from .pipeline_components.data_loaders.closest_points_data_loader import ClosestPointsDataLoader
+from .pipeline_components.data_loaders.floor_data_loader import FloorDataLoader
 from .pipeline_components.data_segmenters.floor_detection_component import FloorDetectionComponent
+from .pipeline_components.data_segmenters.incremental_floor_detection_component import IncrementalFloorDetectionComponent
 from .pipeline_components.object_extractors.closest_point_finder_component import ClosestPointFinderComponent
+from .pipeline_components.object_extractors.incremental_closest_point_finder_component import IncrementalClosestPointFinderComponent
 from .pipeline_components.data_visualizer.point_cloud_data_vizualizer import PointCloudDataVisualizer
 from .pipeline_components.data_visualizer.camera_trajectory_vizualizer import CameraTrajectoryVisualizer
 from .pipeline_components.data_writers.slam_output_writer import SLAMOutputWriter
+from .pipeline_components.data_writers.enhanced_slam_output_writer import EnhancedSLAMOutputWriter
 
 class PipelineBuilder:
     """
@@ -36,11 +41,16 @@ class PipelineBuilder:
         # New modular components from process_slam_output.py
         "TrajectoryDataLoader": TrajectoryDataLoader,
         "PLYPointCloudLoader": PLYPointCloudLoader,
+        "ClosestPointsDataLoader": ClosestPointsDataLoader,
+        "FloorDataLoader": FloorDataLoader,
         "FloorDetectionComponent": FloorDetectionComponent,
+        "IncrementalFloorDetectionComponent": IncrementalFloorDetectionComponent,
         "ClosestPointFinderComponent": ClosestPointFinderComponent,
+        "IncrementalClosestPointFinderComponent": IncrementalClosestPointFinderComponent,
         "PointCloudDataVisualizer": PointCloudDataVisualizer,
         "CameraTrajectoryVisualizer": CameraTrajectoryVisualizer,
         "SLAMOutputWriter": SLAMOutputWriter,
+        "EnhancedSLAMOutputWriter": EnhancedSLAMOutputWriter,
         
         # Add other components here as they are implemented
     }

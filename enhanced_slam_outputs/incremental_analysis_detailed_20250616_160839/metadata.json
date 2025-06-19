@@ -1,0 +1,51 @@
+{
+  "generation_info": {
+    "generated": "2025-06-16T16:15:50.238342",
+    "final_step_number": 191,
+    "output_directory": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_160839"
+  },
+  "configuration": {
+    "save_point_cloud": true,
+    "save_trajectory": true,
+    "save_floor_data": true,
+    "save_closest_points": true,
+    "save_intermediate": true,
+    "intermediate_interval": 5,
+    "analysis_format": "json",
+    "output_name": "incremental_analysis_detailed"
+  },
+  "data_summary": {
+    "total_poses": 192,
+    "trajectory_duration": 3.1641558224543083,
+    "has_floor_data": true,
+    "closest_points_3d_count": 190,
+    "closest_points_floor_count": 190
+  },
+  "file_paths": {
+    "output_directory": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_160839",
+    "point_cloud_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_160839/incremental_analysis_detailed_pointcloud.ply",
+    "trajectory_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_160839/incremental_analysis_detailed_trajectory.txt",
+    "floor_data_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_160839/incremental_analysis_detailed_floor_data.json",
+    "closest_points_path": "enhanced_slam_outputs/incremental_analysis_detailed_20250616_160839/incremental_analysis_detailed_closest_points.json"
+  },
+  "floor_detection": {
+    "floor_normal": [
+      0.2703631818294525,
+      -0.027905303984880447,
+      -0.9623538851737976
+    ],
+    "floor_offset": -2.8926167488098145,
+    "detection_step": 191,
+    "timestamp": 0.0
+  },
+  "distance_analysis": {
+    "avg_distance_3d": 0.6872701707484897,
+    "min_distance_3d": 0.36798221371609385,
+    "max_distance_3d": 1.0071912953537054,
+    "std_distance_3d": 0.15972571281260156,
+    "avg_distance_floor": 0.17302779317460534,
+    "min_distance_floor": 0.00037951813167844557,
+    "max_distance_floor": 0.6068321776740427,
+    "std_distance_floor": 0.1520157484204376
+  }
+}

@@ -12,6 +12,8 @@ import torch.multiprocessing as mp
 import torch
 import lietorch
 import numpy as np
+import traceback
+import atexit
 
 from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
 from mast3r_slam.mast3r_utils import (
@@ -99,76 +101,109 @@ def run_backend(cfg, model, states, keyframes, K):
     Raises:
         -
     """
-    set_global_config(cfg)
+    try:
+        set_global_config(cfg)
 
-    device = keyframes.device
-    factor_graph = FactorGraph(model, keyframes, K, device)
-    retrieval_database = load_retriever(model, retriever_path = "MASt3R-SLAM/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth")
+        device = keyframes.device
+        factor_graph = FactorGraph(model, keyframes, K, device)
+        retrieval_database = load_retriever(model, retriever_path = "MASt3R-SLAM/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth")
 
-    mode = states.get_mode()
-    while mode is not Mode.TERMINATED:
-        mode = states.get_mode()
-        if mode == Mode.INIT or states.is_paused():
-            time.sleep(0.01)
-            continue
-        if mode == Mode.RELOC:
-            frame = states.get_frame()
-            success = relocalization(frame, keyframes, factor_graph, retrieval_database)
-            if success:
-                states.set_mode(Mode.TRACKING)
-            states.dequeue_reloc()
-            continue
-        idx = -1
-        with states.lock:
-            if len(states.global_optimizer_tasks) > 0:
-                idx = states.global_optimizer_tasks[0]
-        if idx == -1:
-            time.sleep(0.01)
-            continue
+        # Check if manager is still alive before starting main loop
+        try:
+            mode = states.get_mode()
+        except (FileNotFoundError, ConnectionError, EOFError):
+            print("Backend: Manager connection lost, terminating backend process")
+            return
 
-        # Graph Construction
-        kf_idx = []
-        # k to previous consecutive keyframes
-        n_consec = 1
-        for j in range(min(n_consec, idx)):
-            kf_idx.append(idx - 1 - j)
-        frame = keyframes[idx]
-        retrieval_inds = retrieval_database.update(
-            frame,
-            add_after_query=True,
-            k=config["retrieval"]["k"],
-            min_thresh=config["retrieval"]["min_thresh"],
-        )
-        kf_idx += retrieval_inds
+        while mode is not Mode.TERMINATED:
+            try:
+                mode = states.get_mode()
+            except (FileNotFoundError, ConnectionError, EOFError):
+                print("Backend: Manager connection lost during operation, terminating backend process")
+                break
+                
+            if mode == Mode.INIT or states.is_paused():
+                time.sleep(0.01)
+                continue
+            if mode == Mode.RELOC:
+                try:
+                    frame = states.get_frame()
+                    success = relocalization(frame, keyframes, factor_graph, retrieval_database)
+                    if success:
+                        states.set_mode(Mode.TRACKING)
+                    states.dequeue_reloc()
+                except (FileNotFoundError, ConnectionError, EOFError):
+                    print("Backend: Manager connection lost during reloc, terminating backend process")
+                    break
+                continue
+            idx = -1
+            try:
+                with states.lock:
+                    if len(states.global_optimizer_tasks) > 0:
+                        idx = states.global_optimizer_tasks[0]
+            except (FileNotFoundError, ConnectionError, EOFError):
+                print("Backend: Manager connection lost during task check, terminating backend process")
+                break
+                
+            if idx == -1:
+                time.sleep(0.01)
+                continue
 
-        lc_inds = set(retrieval_inds)
-        lc_inds.discard(idx - 1)
-        if len(lc_inds) > 0:
-            print("Database retrieval", idx, ": ", lc_inds)
-
-        kf_idx = set(kf_idx)  # Remove duplicates by using set
-        kf_idx.discard(idx)  # Remove current kf idx if included
-        kf_idx = list(kf_idx)  # convert to list
-        frame_idx = [idx] * len(kf_idx)
-        if kf_idx:
-            factor_graph.add_factors(
-                kf_idx, frame_idx, config["local_opt"]["min_match_frac"]
+            # Graph Construction
+            kf_idx = []
+            # k to previous consecutive keyframes
+            n_consec = 1
+            for j in range(min(n_consec, idx)):
+                kf_idx.append(idx - 1 - j)
+            frame = keyframes[idx]
+            retrieval_inds = retrieval_database.update(
+                frame,
+                add_after_query=True,
+                k=config["retrieval"]["k"],
+                min_thresh=config["retrieval"]["min_thresh"],
             )
+            kf_idx += retrieval_inds
 
-        with states.lock:
-            states.edges_ii[:] = factor_graph.ii.cpu().tolist()
-            states.edges_jj[:] = factor_graph.jj.cpu().tolist()
+            lc_inds = set(retrieval_inds)
+            lc_inds.discard(idx - 1)
+            if len(lc_inds) > 0:
+                print("Database retrieval", idx, ": ", lc_inds)
 
-        if config["use_calib"]:
-            factor_graph.solve_GN_calib()
-        else:
-            factor_graph.solve_GN_rays()
+            kf_idx = set(kf_idx)  # Remove duplicates by using set
+            kf_idx.discard(idx)  # Remove current kf idx if included
+            kf_idx = list(kf_idx)  # convert to list
+            frame_idx = [idx] * len(kf_idx)
+            if kf_idx:
+                factor_graph.add_factors(
+                    kf_idx, frame_idx, config["local_opt"]["min_match_frac"]
+                )
 
-        with states.lock:
-            if len(states.global_optimizer_tasks) > 0:
-                idx = states.global_optimizer_tasks.pop(0)
+            try:
+                with states.lock:
+                    states.edges_ii[:] = factor_graph.ii.cpu().tolist()
+                    states.edges_jj[:] = factor_graph.jj.cpu().tolist()
+            except (FileNotFoundError, ConnectionError, EOFError):
+                print("Backend: Manager connection lost during edge update, terminating backend process")
+                break
 
+            if config["use_calib"]:
+                factor_graph.solve_GN_calib()
+            else:
+                factor_graph.solve_GN_rays()
 
+            try:
+                with states.lock:
+                    if len(states.global_optimizer_tasks) > 0:
+                        idx = states.global_optimizer_tasks.pop(0)
+            except (FileNotFoundError, ConnectionError, EOFError):
+                print("Backend: Manager connection lost during task completion, terminating backend process")
+                break
+                
+    except Exception as e:
+        print(f"Backend process error: {e}")
+        traceback.print_exc()
+    finally:
+        print("Backend process terminating")
 
 
 class MAST3RSLAMComponent(AbstractSLAMComponent):
@@ -199,14 +234,16 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         self.point_cloud_method = point_cloud_method
 
         self._is_inited = False
-
+        self._is_terminated = False
 
         #prepare MAST3R Slam init based on their main
-        mp.set_start_method("spawn")
+        mp.set_start_method("spawn", force=True)
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.set_grad_enabled(False)    
         self.manager = mp.Manager()
         
+        # Register cleanup on exit
+        atexit.register(self._cleanup)
 
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -240,24 +277,47 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         self.backend = mp.Process(target=run_backend, args=(config, self.model, self.states, self.keyframes, calibration_K))
         self.backend.start()
 
+    def _cleanup(self):
+        """
+        Clean up resources and terminate processes safely.
+        """
+        if self._is_terminated:
+            return
+            
+        self._is_terminated = True
+        
+        try:
+            # Set termination mode if states exist
+            if hasattr(self, 'states'):
+                try:
+                    self.states.set_mode(Mode.TERMINATED)
+                except (FileNotFoundError, ConnectionError, EOFError):
+                    pass  # Manager already dead
+        except:
+            pass
+            
+        # Terminate backend process
+        if hasattr(self, "backend") and self.backend.is_alive():
+            try:
+                self.backend.terminate()
+                self.backend.join(timeout=5.0)  # Wait up to 5 seconds
+                if self.backend.is_alive():
+                    self.backend.kill()  # Force kill if still alive
+            except:
+                pass
+                
+        # Shutdown manager
+        if hasattr(self, "manager"):
+            try:
+                self.manager.shutdown()
+            except:
+                pass
 
     def __del__(self):
         """
         Terminate the backend of masterslam on exit.
-
-        Args:
-            -
-
-        Returns:
-            -
-
-        Raises:
-            -
         """
-        
-        if hasattr(self, "backend") and self.backend.is_alive():
-            self.backend.terminate()
-            self.backend.join()
+        self._cleanup()
 
     def _run(self, 
              image: ImageDataEntity,
@@ -283,70 +343,82 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             Dict[str, Any]: A dictionary containing the point cloud ("point_cloud") and camera pose ("camera_pose").
         """
         
+        if self._is_terminated:
+            raise RuntimeError("SLAM component has been terminated")
 
         if not self._is_inited:
             self._init_mast3r_slam(img_height=image_height,img_width=image_width,calibration_K=calibration_K)
             self._is_inited = True
 
-        mode = self.states.get_mode()
+        try:
+            mode = self.states.get_mode()
+        except (FileNotFoundError, ConnectionError, EOFError):
+            raise RuntimeError("SLAM backend manager connection lost")
         
-        T_WC = (
-            lietorch.Sim3.Identity(1, device=self.device)
-            if step_nr == 0
-            else self.states.get_frame().T_WC
-        )
+        try:
+            T_WC = (
+                lietorch.Sim3.Identity(1, device=self.device)
+                if step_nr == 0
+                else self.states.get_frame().T_WC
+            )
+        except (FileNotFoundError, ConnectionError, EOFError):
+            raise RuntimeError("SLAM backend manager connection lost during frame retrieval")
+            
         frame = create_frame(step_nr, image.as_numpy(), T_WC, img_size=image_size, device=self.device)
-
-
 
         X_init,C_init = None, None
         X,C = None, None
 
         add_new_kf = False
-        if mode == Mode.INIT:
-            # Initialize via mono inference, and encoded features neeed for database
-            X_init, C_init = mast3r_inference_mono(self.model, frame)
-            frame.update_pointmap(X_init, C_init)
-            self.keyframes.append(frame)
-            self.states.queue_global_optimization(len(self.keyframes) - 1)
-            self.states.set_mode(Mode.TRACKING)
-            self.states.set_frame(frame)
-            
-        elif mode == Mode.TRACKING:
-            add_new_kf, match_info, try_reloc = self.tracker.track(frame)
-            if try_reloc:
-                self.states.set_mode(Mode.RELOC)
-            self.states.set_frame(frame)
+        try:
+            if mode == Mode.INIT:
+                # Initialize via mono inference, and encoded features neeed for database
+                X_init, C_init = mast3r_inference_mono(self.model, frame)
+                frame.update_pointmap(X_init, C_init)
+                self.keyframes.append(frame)
+                self.states.queue_global_optimization(len(self.keyframes) - 1)
+                self.states.set_mode(Mode.TRACKING)
+                self.states.set_frame(frame)
+                
+            elif mode == Mode.TRACKING:
+                add_new_kf, match_info, try_reloc = self.tracker.track(frame)
+                if try_reloc:
+                    self.states.set_mode(Mode.RELOC)
+                self.states.set_frame(frame)
 
-        elif mode == Mode.RELOC:
-            X, C = mast3r_inference_mono(self.model, frame)
-            frame.update_pointmap(X, C)
-            self.states.set_frame(frame)
-            self.states.queue_reloc()
-            # In single threaded mode, make sure relocalization happen for every frame
-            while config["single_thread"]:
-                with self.states.lock:
-                    if self.states.reloc_sem.value == 0:
-                        break
-                time.sleep(0.01)
+            elif mode == Mode.RELOC:
+                X, C = mast3r_inference_mono(self.model, frame)
+                frame.update_pointmap(X, C)
+                self.states.set_frame(frame)
+                self.states.queue_reloc()
+                # In single threaded mode, make sure relocalization happen for every frame
+                while config["single_thread"]:
+                    try:
+                        with self.states.lock:
+                            if self.states.reloc_sem.value == 0:
+                                break
+                    except (FileNotFoundError, ConnectionError, EOFError):
+                        raise RuntimeError("SLAM backend manager connection lost during reloc sync")
+                    time.sleep(0.01)
 
-        else:
-            raise Exception("Invalid mode")
+            else:
+                raise Exception("Invalid mode")
 
-        if add_new_kf:
-            self.keyframes.append(frame)
-            self.states.queue_global_optimization(len(self.keyframes) - 1)
-            # In single threaded mode, wait for the backend to finish
-            while config["single_thread"]:
-                with self.states.lock:
-                    if len(self.states.global_optimizer_tasks) == 0:
-                        break
-                time.sleep(0.01)
-
-
-
-
-
+            if add_new_kf:
+                self.keyframes.append(frame)
+                self.states.queue_global_optimization(len(self.keyframes) - 1)
+                # In single threaded mode, wait for the backend to finish
+                while config["single_thread"]:
+                    try:
+                        with self.states.lock:
+                            if len(self.states.global_optimizer_tasks) == 0:
+                                break
+                    except (FileNotFoundError, ConnectionError, EOFError):
+                        raise RuntimeError("SLAM backend manager connection lost during optimization sync")
+                    time.sleep(0.01)
+                    
+        except (FileNotFoundError, ConnectionError, EOFError):
+            raise RuntimeError("SLAM backend manager connection lost during processing")
 
         #project the keyframes onto the current pointcloud
         

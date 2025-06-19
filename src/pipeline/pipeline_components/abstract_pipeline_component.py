@@ -32,6 +32,11 @@ class AbstractPipelineComponent(ABC):
         pass
     
     @property
+    def optional_inputs_from_bucket(self) -> List[str]:
+        """List of optional data entities this component can use as input."""
+        return []
+    
+    @property
     def config(self) -> Dict[str, Any]:
         """Configuration dictionary for this component."""
         return self._config
