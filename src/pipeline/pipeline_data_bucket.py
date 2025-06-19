@@ -26,6 +26,16 @@ class PipelineDataBucket:
         "camera_pose",
         "timestamp",
         "calibration_K"
+
+        "floor_normal", 
+        "floor_offset", 
+        "floor_threshold", 
+        "floor_points",
+
+        "n_closest_points_3d", 
+        "n_closest_points_index", 
+        "n_closest_points_distance_2d",
+        "view_cone_mask"
     ]
     
     def __init__(self) -> None:
