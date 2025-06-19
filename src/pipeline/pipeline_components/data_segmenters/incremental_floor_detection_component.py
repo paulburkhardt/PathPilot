@@ -151,7 +151,12 @@ class IncrementalFloorDetectionComponent(AbstractPipelineComponent):
             }
         
         # Not ready yet
-        return {}
+        return {
+            "floor_normal": None,
+            "floor_offset": None,
+            "floor_threshold": None,
+            "floor_points": None
+        }
 
     def _extract_camera_position(self, camera_pose) -> Optional[np.ndarray]:
         """Extract current camera position from pose object."""

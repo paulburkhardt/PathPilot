@@ -154,9 +154,9 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         if floor_normal is None or floor_offset is None:
             # Return empty outputs if floor is not yet available
             outputs = {
-                "n_closest_points_3d": np.array([]),
-                "n_closest_points_index": np.array([]),
-                "n_closest_points_distance_2d": np.array([]),
+                "n_closest_points_3d": np.empty((0, 3),dtype=float),
+                "n_closest_points_index": np.empty((0,), dtype=int),
+                "n_closest_points_distance_2d": np.empty((0,),dtype=float),
             }
             if self.use_view_cone:
                 outputs["view_cone_mask"] = np.array([])
