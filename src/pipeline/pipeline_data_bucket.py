@@ -25,7 +25,7 @@ class PipelineDataBucket:
         "point_cloud",
         "camera_pose",
         "timestamp",
-        "calibration_K"
+        "calibration_K",
 
         "floor_normal", 
         "floor_offset", 
