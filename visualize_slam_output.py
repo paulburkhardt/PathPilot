@@ -67,9 +67,41 @@ class SLAMOutputVisualizer:
             with open(metadata_path, 'r') as f:
                 self.data['metadata'] = json.load(f)
             print(f"Loaded metadata from {metadata_path}")
+            
+            # Update visualization config based on pipeline configuration
+            self._update_config_from_metadata()
         else:
             print("No metadata.json found, will search for standard file names")
             self.data['metadata'] = {}
+    
+    def _update_config_from_metadata(self) -> None:
+        """Update visualization configuration based on pipeline metadata."""
+        if 'pipeline_configuration' not in self.data['metadata']:
+            return
+        
+        pipeline_config = self.data['metadata']['pipeline_configuration']
+        
+        # Look for IncrementalClosestPointFinderComponent configuration
+        if 'pipeline' in pipeline_config and 'components' in pipeline_config['pipeline']:
+            for component in pipeline_config['pipeline']['components']:
+                if component.get('type') == 'IncrementalClosestPointFinderComponent':
+                    component_config = component.get('config', {})
+                    
+                    # Override view cone settings from pipeline config
+                    use_view_cone = component_config.get('use_view_cone', False)
+                    cone_angle = component_config.get('cone_angle_deg', 90.0)
+                    
+                    # Update visualization config
+                    # If view cones were enabled in pipeline but user didn't explicitly disable them
+                    if use_view_cone and not hasattr(self, '_user_disabled_view_cones'):
+                        self.config['show_view_cones'] = True
+                    elif not use_view_cone:
+                        self.config['show_view_cones'] = False
+                    
+                    self.config['view_cone_angle'] = cone_angle
+                    
+                    print(f"Updated view cone settings from pipeline config: enabled={self.config['show_view_cones']}, angle={cone_angle}°")
+                    break
     
     def _load_point_cloud(self) -> None:
         """Load point cloud from PLY file."""
@@ -694,6 +726,8 @@ Examples:
     python visualize_slam_output.py ./enhanced_slam_outputs/slam_analysis_20240115_143045
     python visualize_slam_output.py ./outputs --no-view-cones --no-floor
     python visualize_slam_output.py ./outputs --cone-angle 45 --grid-size 5.0
+    
+Note: View cone settings will be automatically configured from pipeline metadata if available.
         """
     )
     
@@ -760,6 +794,11 @@ def main():
     try:
         # Create and run visualizer
         visualizer = SLAMOutputVisualizer(args.output_dir, config)
+        
+        # Track if user explicitly disabled view cones
+        if args.no_view_cones:
+            visualizer._user_disabled_view_cones = True
+        
         visualizer.load_data()
         visualizer.visualize()
         

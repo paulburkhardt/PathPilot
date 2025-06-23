@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from .pipeline_data_bucket import PipelineDataBucket
 from .pipeline_components.abstract_pipeline_component import AbstractPipelineComponent
 
@@ -20,6 +20,7 @@ class Pipeline:
     
     def __init__(self, components: List[AbstractPipelineComponent]) -> None:
         self.components = components
+        self.full_config: Optional[Dict[str, Any]] = None
         self.validate()
     
     def validate(self) -> None:

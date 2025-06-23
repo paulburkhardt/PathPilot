@@ -13,7 +13,6 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
     Args:
         use_view_cone: Enable view cone filtering (default: False)
         cone_angle_deg: Half-angle of view cone in degrees (default: 90.0)
-        max_view_distance: Maximum distance for view cone filtering (default: 10.0)
         floor_distance_threshold: Maximum distance from floor plane to consider a point as "on floor" (default: 0.05)
         n_closest_points: Number of closest points to return (default: 20)
     
@@ -27,13 +26,11 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
     def __init__(self, 
                  use_view_cone: bool = False, 
                  cone_angle_deg: float = 90.0,
-                 max_view_distance: float = 10.0,
                  floor_distance_threshold: float = 0.05,
                  n_closest_points: int = 20) -> None:
         super().__init__()
         self.use_view_cone = use_view_cone
         self.cone_angle_deg = cone_angle_deg
-        self.max_view_distance = max_view_distance
         self.floor_distance_threshold = floor_distance_threshold
         self.n_closest_points = n_closest_points
 
@@ -109,9 +106,6 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         # Distance from camera to each point
         distances = np.linalg.norm(points_relative, axis=1)
         
-        # Filter out points beyond max view distance
-        distance_mask = distances <= self.max_view_distance
-        
         # Normalize relative vectors
         valid_distances = distances > 1e-8  # Avoid division by zero
         normalized_relative = np.zeros_like(points_relative)
@@ -127,8 +121,8 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         # Filter points within cone angle
         cone_mask = angles_deg <= self.cone_angle_deg
         
-        # Combine distance and cone masks
-        view_cone_mask = distance_mask & cone_mask & valid_distances
+        # Combine cone mask with valid distances
+        view_cone_mask = cone_mask & valid_distances
         
         return view_cone_mask
 
@@ -258,7 +252,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                     "n_closest_points_index": np.array([]),
                     "n_closest_points_distance_2d": np.array([]),
                     "floor_filtered_mask": floor_filtered_mask,
-                    "view_cone_mask": view_cone_mask_full
+                    "view_cone_mask": view_cone_mask_full,
                 }
                 return outputs
             

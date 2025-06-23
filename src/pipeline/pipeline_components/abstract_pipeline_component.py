@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from ..pipeline_data_bucket import PipelineDataBucket
 
 class AbstractPipelineComponent(ABC):
@@ -18,6 +18,7 @@ class AbstractPipelineComponent(ABC):
     
     def __init__(self) -> None:
         self._config: Dict[str, Any] = {}
+        self.full_pipeline_config: Optional[Dict[str, Any]] = None
         
     @property
     @abstractmethod

@@ -64,6 +64,11 @@ class PipelineBuilder:
             
             # Set component configuration
             component.config = component_config
+            # Set full pipeline configuration for components that need it
+            component.full_pipeline_config = config
             components.append(component)
             
-        return Pipeline(components)
+        # Create pipeline with full configuration
+        pipeline = Pipeline(components)
+        pipeline.full_config = config
+        return pipeline
