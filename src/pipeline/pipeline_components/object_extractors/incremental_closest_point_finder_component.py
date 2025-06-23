@@ -8,12 +8,13 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
     """
     Component for finding closest points to the current camera position in accumulated point cloud.
     Works incrementally and waits for floor detection to be available before calculating floor distances.
+    Always filters out points that are on the floor plane.
     
     Args:
         use_view_cone: Enable view cone filtering (default: False)
         cone_angle_deg: Half-angle of view cone in degrees (default: 90.0)
         max_view_distance: Maximum distance for view cone filtering (default: 10.0)
-        use_floor_distance: Calculate horizontal distances on floor plane (default: True)
+        floor_distance_threshold: Maximum distance from floor plane to consider a point as "on floor" (default: 0.05)
         n_closest_points: Number of closest points to return (default: 20)
     
     Returns:
@@ -27,11 +28,13 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                  use_view_cone: bool = False, 
                  cone_angle_deg: float = 90.0,
                  max_view_distance: float = 10.0,
+                 floor_distance_threshold: float = 0.05,
                  n_closest_points: int = 20) -> None:
         super().__init__()
         self.use_view_cone = use_view_cone
         self.cone_angle_deg = cone_angle_deg
         self.max_view_distance = max_view_distance
+        self.floor_distance_threshold = floor_distance_threshold
         self.n_closest_points = n_closest_points
 
     @property
@@ -47,7 +50,8 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         outputs = [
             "n_closest_points_3d", 
             "n_closest_points_index", 
-            "n_closest_points_distance_2d", 
+            "n_closest_points_distance_2d",
+            "floor_filtered_mask",
         ]
 
             
@@ -128,6 +132,31 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         
         return view_cone_mask
 
+    def _filter_floor_points(self, points_3d, floor_normal, floor_offset):
+        """
+        Filter out points that are too close to the floor plane.
+        
+        Args:
+            points_3d: Array of 3D points [N, 3]
+            floor_normal: Floor plane normal vector [3]
+            floor_offset: Floor plane offset scalar
+            
+        Returns:
+            np.ndarray: Boolean mask indicating which points are NOT on the floor
+        """
+        floor_normal = np.array(floor_normal).reshape(3)
+        floor_normal = floor_normal / np.linalg.norm(floor_normal)  # Normalize
+        
+        # Calculate distance from each point to the floor plane
+        # Distance = |ax + by + cz + d| / sqrt(a² + b² + c²)
+        # Since we have normalized normal vector: distance = |dot(point, normal) - offset|
+        distances_to_floor = np.abs(np.dot(points_3d, floor_normal) - floor_offset)
+        
+        # Keep points that are above the threshold distance from floor
+        not_on_floor_mask = distances_to_floor > self.floor_distance_threshold
+        
+        return not_on_floor_mask
+
     def _run(self, 
              point_cloud, 
              camera_pose, 
@@ -157,6 +186,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                 "n_closest_points_3d": np.empty((0, 3),dtype=float),
                 "n_closest_points_index": np.empty((0,), dtype=int),
                 "n_closest_points_distance_2d": np.empty((0,),dtype=float),
+                "floor_filtered_mask": np.array([]),
             }
             if self.use_view_cone:
                 outputs["view_cone_mask"] = np.array([])
@@ -171,6 +201,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                 "n_closest_points_3d": np.array([]),
                 "n_closest_points_index": np.array([]),
                 "n_closest_points_distance_2d": np.array([]),
+                "floor_filtered_mask": np.array([]),
             }
             if self.use_view_cone:
                 outputs["view_cone_mask"] = np.array([])
@@ -194,28 +225,53 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             else:
                 raise ValueError(f"Unsupported camera pose format: {type(camera_pose)}")
         
+        # Always filter out floor points first
+        floor_filtered_mask = self._filter_floor_points(points_3d, floor_normal, floor_offset)
+        
+        if not np.any(floor_filtered_mask):
+            # No points above floor
+            outputs = {
+                "n_closest_points_3d": np.array([]),
+                "n_closest_points_index": np.array([]),
+                "n_closest_points_distance_2d": np.array([]),
+                "floor_filtered_mask": floor_filtered_mask,
+            }
+            if self.use_view_cone:
+                outputs["view_cone_mask"] = np.array([])
+            return outputs
+        
+        points_3d_after_floor = points_3d[floor_filtered_mask]
+        indices_after_floor = np.where(floor_filtered_mask)[0]
+        
         # Apply view cone filtering if enabled
         if self.use_view_cone:
             camera_direction = self._get_camera_direction(camera_pose)
-            view_cone_mask = self._apply_view_cone_filter(points_3d, camera_position, camera_direction)
+            view_cone_mask_subset = self._apply_view_cone_filter(points_3d_after_floor, camera_position, camera_direction)
             
             # Filter points to only those in view cone
-            if not np.any(view_cone_mask):
-                # No points in view cone
+            if not np.any(view_cone_mask_subset):
+                # No points in view cone after floor filtering
+                # Create full view cone mask for original point cloud
+                view_cone_mask_full = np.zeros(len(points_3d), dtype=bool)
                 outputs = {
                     "n_closest_points_3d": np.array([]),
                     "n_closest_points_index": np.array([]),
                     "n_closest_points_distance_2d": np.array([]),
-                    "view_cone_mask": np.array([])
+                    "floor_filtered_mask": floor_filtered_mask,
+                    "view_cone_mask": view_cone_mask_full
                 }
                 return outputs
             
-            points_3d_filtered = points_3d[view_cone_mask]
-            original_indices = np.where(view_cone_mask)[0]
+            points_3d_filtered = points_3d_after_floor[view_cone_mask_subset]
+            original_indices = indices_after_floor[view_cone_mask_subset]
+            
+            # Create full view cone mask for original point cloud
+            view_cone_mask_full = np.zeros(len(points_3d), dtype=bool)
+            view_cone_mask_full[indices_after_floor[view_cone_mask_subset]] = True
         else:
-            points_3d_filtered = points_3d
-            original_indices = np.arange(len(points_3d))
-            view_cone_mask = np.ones(len(points_3d), dtype=bool)
+            points_3d_filtered = points_3d_after_floor
+            original_indices = indices_after_floor
+            view_cone_mask_full = np.ones(len(points_3d), dtype=bool)
         
         # Project all points onto the floor plane
         floor_normal = np.array(floor_normal).reshape(3)
@@ -255,11 +311,12 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             "n_closest_points_3d": closest_points_3d,
             "n_closest_points_index": closest_original_indices,
             "n_closest_points_distance_2d": closest_distances_2d,
+            "floor_filtered_mask": floor_filtered_mask,
         }
         
         # Add view cone mask if enabled
         if self.use_view_cone:
-            outputs["view_cone_mask"] = view_cone_mask
+            outputs["view_cone_mask"] = view_cone_mask_full
         
         return outputs
         

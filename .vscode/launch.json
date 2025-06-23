@@ -77,7 +77,7 @@
             "console": "integratedTerminal",
             "args": [
                 "--config-name",
-                "phase_1_incremental_slam_analysis_with_intermediate"
+                "phase_1_incremental_slam_analysis"
             ],
             "justMyCode": false
         },
