@@ -59,7 +59,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
 
     def _get_camera_direction(self, camera_pose):
         """
-        Extract camera direction vector from pose.
+        Extract camera direction vector from pose using +Z convention.
         
         Args:
             camera_pose: Camera pose object (T_WC)
@@ -69,10 +69,11 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         """
         try:
             # For lietorch.Sim3, get the rotation matrix and extract forward direction
-            # Camera typically looks in -Z direction in camera frame
             rotation_matrix = camera_pose.matrix()[0,0:3,0:3].cpu().numpy().reshape(3, 3)
-            # Forward direction is -Z in camera coordinates, transformed to world coordinates
-            camera_forward = rotation_matrix @ np.array([0, 0, -1])
+            
+            # Use +Z convention (OpenGL/visualization convention)
+            camera_forward = rotation_matrix @ np.array([0, 0, 1])
+            
         except AttributeError:
             # Fallback: if it's a matrix, extract rotation part
             if hasattr(camera_pose, 'cpu'):
@@ -82,47 +83,77 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             
             if pose_matrix.shape == (4, 4):
                 rotation_matrix = pose_matrix[:3, :3]
-                camera_forward = rotation_matrix @ np.array([0, 0, -1])
+                # Use +Z convention
+                camera_forward = rotation_matrix @ np.array([0, 0, 1])
             else:
                 raise ValueError(f"Unsupported camera pose format: {type(camera_pose)}")
         
         return camera_forward / np.linalg.norm(camera_forward)
 
-    def _apply_view_cone_filter(self, points_3d, camera_position, camera_direction):
+    def _apply_view_cone_filter(self, points_3d, camera_position, camera_direction, step_nr=None):
         """
-        Apply view cone filtering to points.
+        Apply view cone filtering to points with improved stability and debugging.
         
         Args:
             points_3d: Array of 3D points [N, 3]
             camera_position: Camera position [3]
             camera_direction: Camera direction vector [3]
+            step_nr: Current step number for debugging (optional)
             
         Returns:
             np.ndarray: Boolean mask indicating which points are in view cone
         """
+        if len(points_3d) == 0:
+            return np.array([], dtype=bool)
+        
         # Vector from camera to each point
         points_relative = points_3d - camera_position[np.newaxis, :]
         
         # Distance from camera to each point
         distances = np.linalg.norm(points_relative, axis=1)
+        valid_distances = distances > 1e-6  # More conservative threshold
         
-        # Normalize relative vectors
-        valid_distances = distances > 1e-8  # Avoid division by zero
+        if not np.any(valid_distances):
+            if step_nr is not None:
+                print(f"Warning: No valid points with sufficient distance at step {step_nr}")
+            return np.zeros(len(points_3d), dtype=bool)
+        
+        # Normalize relative vectors (only for valid distances)
         normalized_relative = np.zeros_like(points_relative)
-        normalized_relative[valid_distances] = points_relative[valid_distances] / distances[valid_distances, np.newaxis]
+        normalized_relative[valid_distances] = (
+            points_relative[valid_distances] / distances[valid_distances, np.newaxis]
+        )
         
-        # Calculate angle between camera direction and vector to each point
+        # Use direct cosine threshold instead of arccos for better stability
+        cone_threshold = np.cos(np.radians(self.cone_angle_deg))
+        
+        # Calculate dot products with camera direction
         dot_products = np.dot(normalized_relative, camera_direction)
-        # Clamp dot products to valid range [-1, 1] to handle numerical errors
-        dot_products = np.clip(dot_products, -1.0, 1.0)
-        angles_rad = np.arccos(dot_products)
-        angles_deg = np.degrees(angles_rad)
         
-        # Filter points within cone angle
-        cone_mask = angles_deg <= self.cone_angle_deg
+        # Points within cone: dot_product >= cos(angle)
+        cone_mask = dot_products >= cone_threshold
         
-        # Combine cone mask with valid distances
+        # Combine with valid distances
         view_cone_mask = cone_mask & valid_distances
+        
+        # Debug information for early steps
+        if step_nr is not None and step_nr <= 5:
+            n_points = len(points_3d)
+            n_valid_dist = np.sum(valid_distances)
+            n_in_cone = np.sum(cone_mask & valid_distances)
+            
+            print(f"Step {step_nr} view cone debug:")
+            print(f"  - Total points: {n_points}")
+            print(f"  - Valid distances: {n_valid_dist}")
+            print(f"  - Points in cone: {n_in_cone}")
+            print(f"  - Cone angle: {self.cone_angle_deg}°")
+            print(f"  - Cone threshold (cos): {cone_threshold:.3f}")
+            print(f"  - Camera position: {camera_position}")
+            print(f"  - Camera direction: {camera_direction}")
+            
+            if n_valid_dist > 0:
+                print(f"  - Distance range: {distances[valid_distances].min():.3f} - {distances[valid_distances].max():.3f}")
+                print(f"  - Dot product range: {dot_products[valid_distances].min():.3f} - {dot_products[valid_distances].max():.3f}")
         
         return view_cone_mask
 
@@ -240,7 +271,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         # Apply view cone filtering if enabled
         if self.use_view_cone:
             camera_direction = self._get_camera_direction(camera_pose)
-            view_cone_mask_subset = self._apply_view_cone_filter(points_3d_after_floor, camera_position, camera_direction)
+            view_cone_mask_subset = self._apply_view_cone_filter(points_3d_after_floor, camera_position, camera_direction, step_nr)
             
             # Filter points to only those in view cone
             if not np.any(view_cone_mask_subset):

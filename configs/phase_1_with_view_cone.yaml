@@ -28,7 +28,7 @@ pipeline:
     - type: IncrementalClosestPointFinderComponent
       config:
         use_view_cone: true  # Re-enabled with optimized filtering
-        cone_angle_deg: 60.0
+        cone_angle_deg: 60.0  # This is the half-angle (120° total cone)
         n_closest_points: 20
     
     # Enhanced output writer with intermediate saving enabled
