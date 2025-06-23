@@ -135,25 +135,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         
         # Combine with valid distances
         view_cone_mask = cone_mask & valid_distances
-        
-        # Debug information for early steps
-        if step_nr is not None and step_nr <= 5:
-            n_points = len(points_3d)
-            n_valid_dist = np.sum(valid_distances)
-            n_in_cone = np.sum(cone_mask & valid_distances)
-            
-            print(f"Step {step_nr} view cone debug:")
-            print(f"  - Total points: {n_points}")
-            print(f"  - Valid distances: {n_valid_dist}")
-            print(f"  - Points in cone: {n_in_cone}")
-            print(f"  - Cone angle: {self.cone_angle_deg}°")
-            print(f"  - Cone threshold (cos): {cone_threshold:.3f}")
-            print(f"  - Camera position: {camera_position}")
-            print(f"  - Camera direction: {camera_direction}")
-            
-            if n_valid_dist > 0:
-                print(f"  - Distance range: {distances[valid_distances].min():.3f} - {distances[valid_distances].max():.3f}")
-                print(f"  - Dot product range: {dot_products[valid_distances].min():.3f} - {dot_products[valid_distances].max():.3f}")
+
         
         return view_cone_mask
 
