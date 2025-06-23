@@ -37,7 +37,7 @@
             "cwd": "${workspaceFolder}/MASt3R-SLAM/",
             "args": [
                 "--dataset", 
-                "/usr/prakt/s0124/AFM/PathPilot/data/test_video_1.mp4", 
+                "/usr/prakt/s0124/AFM/PathPilot/Data/one_chair.mp4", 
                 "--config", 
                 "config/no_calib.yaml",
                 "--no-viz"
@@ -45,32 +45,7 @@
             "justMyCode": false
         },
         {
-            "name": "Python Debugger: Main (default config)",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/main.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--config-name",
-                "default_config"
-            ],
-            "justMyCode": false
-        },
-        
-        {
-            "name": "Python Debugger: Main (stage 1 - our video)",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/main.py",
-            "console": "integratedTerminal",
-            "args": [
-                "--config-name",
-                "stage_1_our_video"
-            ],
-            "justMyCode": false
-        },
-        {
-            "name": "Python Debugger: Main (stage 1 - merged)",
+            "name": "Python Debugger: Main (stage 1)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
