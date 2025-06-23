@@ -56,5 +56,17 @@
             ],
             "justMyCode": false
         },
+        {
+            "name": "Python Debugger: Main (stage 2)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config-name",
+                "phase_2_incremental_slam_analysis_with_intermediate"
+            ],
+            "justMyCode": false
+        },
     ]
 }

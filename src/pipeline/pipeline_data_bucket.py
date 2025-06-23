@@ -35,7 +35,10 @@ class PipelineDataBucket:
         "n_closest_points_3d", 
         "n_closest_points_index", 
         "n_closest_points_distance_2d",
-        "view_cone_mask"
+        "view_cone_mask",
+
+        "image_segmentation_mask",
+        "point_cloud_segmentation_mask"
     ]
     
     def __init__(self) -> None:

@@ -8,20 +8,21 @@ class PointCloudDataEntity(AbstractDataEntity):
     """
     Data entity for a pointcloud.
     A pointcloud consists of the following structure:
-    (<number of points>, <x,y,z, (r,g,b), (Confidence score)>), where the inner () means optional
-    
+    (<number of points>, <x,y,z, (r,g,b), (Confidence score), (Segmentation mask)>), where the inner () means optional
 
     Args:
         point_cloud: Pytorch tensor or numpy array of shape (<Number of points>,3).
         rgb: Pytorch tensor or numpy array of shape (<Number of points>, 3).
         confidence_scores: Pytorch tensor or numpy array of shape (<Number of points>, 1) 
+        segmentation_mask: Pytorch tensor or numpy array of shape (<Number of points>, 1), dtype uint
     """
 
     def __init__(
         self,
         point_cloud: np.ndarray | torch.Tensor, 
         rgb: np.ndarray | torch.Tensor = None,
-        confidence_scores: np.ndarray | torch.Tensor = None
+        confidence_scores: np.ndarray | torch.Tensor = None,
+        segmentation_mask: np.ndarray | torch.Tensor = None
     ) -> None:
         """
         Initializes the PointCloudDataEntity.
@@ -69,30 +70,40 @@ class PointCloudDataEntity(AbstractDataEntity):
             self.confidence_scores_pytorch = None
             self.confidence_scores_numpy = None
 
+        if segmentation_mask is not None:
+            if isinstance(segmentation_mask, torch.Tensor):
+                self.segmentation_mask_pytorch = segmentation_mask
+                self.segmentation_mask_numpy = segmentation_mask.cpu().numpy()
+            elif isinstance(segmentation_mask, np.ndarray):
+                self.segmentation_mask_pytorch = torch.from_numpy(segmentation_mask)
+                self.segmentation_mask_numpy = segmentation_mask
+            else:
+                raise TypeError(f"Invalid type {type(segmentation_mask)} for segmentation_mask. Has to be Numpy array or Pytorch tensor.")
+            # Check dtype
+            if self.segmentation_mask_numpy.dtype.kind not in {'u', 'i'}:
+                raise TypeError("segmentation_mask must be of unsigned/signed integer dtype.")
+        else:
+            self.segmentation_mask_pytorch = None
+            self.segmentation_mask_numpy = None
+
         if self.point_cloud_pytorch.ndim != 2 or self.point_cloud_pytorch.shape[1] != 3:
             raise AssertionError(
                 f"point_cloud must have shape (num_points, 3), got {self.point_cloud_pytorch.shape}"
             )
 
-    def as_numpy(self,with_rgb:bool=False,with_confidence_score:bool=False):
+    def as_numpy(self, with_rgb: bool = False, with_confidence_score: bool = False, with_segmentation_mask: bool = False):
         """
         Returns the point cloud data as a NumPy array.
 
         Args:
             with_rgb (bool, optional): If True, includes RGB color information in the returned array.
-                Raises a TypeError if RGB data is not available. Default is False.
             with_confidence_score (bool, optional): If True, includes confidence scores in the returned array.
-                Raises a TypeError if confidence score data is not available. Default is False.
-        
+            with_segmentation_mask (bool, optional): If True, includes segmentation mask in the returned array.
         Returns:
-            np.ndarray: A NumPy array containing the point cloud data. The array will have additional
-                columns for RGB and/or confidence scores if requested and available.
-        
+            np.ndarray: A NumPy array containing the point cloud data.
         Raises:
-            TypeError: If `with_rgb` is True but RGB data is not present.
-            TypeError: If `with_confidence_score` is True but confidence score data is not present.
+            TypeError: If requested data is not present.
         """
-        
         components = [self.point_cloud_numpy]
         if with_rgb: 
             if self.rgb_numpy is not None:
@@ -104,29 +115,31 @@ class PointCloudDataEntity(AbstractDataEntity):
                 components.append(self.confidence_scores_numpy)
             else:
                 raise TypeError("There is no confidence score in this pointcloud.")
-        
-        if len(components)>1:
+        if with_segmentation_mask:
+            if self.segmentation_mask_numpy is not None:
+                components.append(self.segmentation_mask_numpy)
+            else:
+                raise TypeError("There is no segmentation mask in this pointcloud.")
+
+        if len(components) > 1:
             return np.concatenate(components, axis=-1)
         else:
             return self.point_cloud_numpy
 
-    def as_pytorch(self, with_rgb:bool=False, with_confidence_score:bool=False):
+    def as_pytorch(self, with_rgb: bool = False, with_confidence_score: bool = False, with_segmentation_mask: bool = False):
         """
         Converts the point cloud data to a PyTorch tensor.
-        This method returns the point cloud as a PyTorch tensor, optionally including RGB information and/or confidence scores as additional channels.
-        
+        This method returns the point cloud as a PyTorch tensor, optionally including RGB information,
+        confidence scores, and/or segmentation mask as additional channels.
         Args:
-            with_rgb (bool, optional): If True, includes RGB information in the output tensor. Raises a TypeError if RGB data is not available. Default is False.
-            with_confidence_score (bool, optional): If True, includes confidence scores in the output tensor. Raises a TypeError if confidence scores are not available. Default is False.
-        
+            with_rgb (bool, optional): If True, includes RGB information in the output tensor.
+            with_confidence_score (bool, optional): If True, includes confidence scores in the output tensor.
+            with_segmentation_mask (bool, optional): If True, includes segmentation mask in the output tensor.
         Returns:
-            torch.Tensor: A tensor containing the point cloud data, and optionally RGB and confidence score information concatenated along the last dimension.
-        
+            torch.Tensor: A tensor containing the point cloud data.
         Raises:
-            TypeError: If `with_rgb` is True but RGB data is not present.
-            TypeError: If `with_confidence_score` is True but confidence scores are not present.
+            TypeError: If requested data is not present.
         """
-
         components = [self.point_cloud_pytorch]
         if with_rgb:
             if self.rgb_pytorch is not None:
@@ -138,9 +151,13 @@ class PointCloudDataEntity(AbstractDataEntity):
                 components.append(self.confidence_scores_pytorch)
             else:
                 raise TypeError("There is no confidence score in this pointcloud.")
+        if with_segmentation_mask:
+            if self.segmentation_mask_pytorch is not None:
+                components.append(self.segmentation_mask_pytorch)
+            else:
+                raise TypeError("There is no segmentation mask in this pointcloud.")
 
         if len(components) > 1:
             return torch.cat(components, dim=-1)
         else:
-            return self.point_cloud_pytorch    
-
+            return self.point_cloud_pytorch
