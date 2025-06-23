@@ -378,11 +378,37 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             points = self.final_point_cloud.point_cloud_numpy
         else:
             points = self.final_point_cloud
+            
+        colors = None
+        if hasattr(self.final_point_cloud, 'rgb_numpy'):
+            colors = self.final_point_cloud.rgb_numpy
+            
+        confidence = None
+        if hasattr(self.final_point_cloud, 'confidence_scores_numpy'):
+            confidence = self.final_point_cloud.confidence_scores_numpy
         
         ply_path = output_dir / "pointcloud.ply"
         
-        vertex_data = [(points[i, 0], points[i, 1], points[i, 2]) for i in range(len(points))]
-        vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
+        # Prepare vertex data with colors and confidence if available
+        if colors is not None and confidence is not None:
+            vertex_data = [
+                (points[i, 0], points[i, 1], points[i, 2],
+                 colors[i, 0], colors[i, 1], colors[i, 2], confidence[i])
+                for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                           ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'), ('confidence', 'f4')]
+        elif colors is not None:
+            vertex_data = [
+                (points[i, 0], points[i, 1], points[i, 2],
+                 colors[i, 0], colors[i, 1], colors[i, 2])
+                for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                           ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')]
+        else:
+            vertex_data = [(points[i, 0], points[i, 1], points[i, 2]) for i in range(len(points))]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
         
         vertex_array = np.array(vertex_data, dtype=vertex_dtype)
         vertex_element = PlyElement.describe(vertex_array, 'vertex')
