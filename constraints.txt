@@ -1,0 +1,133 @@
+absl-py==2.3.0
+aiofiles==24.1.0
+annotated-types==0.7.0
+anyio==4.9.0
+argcomplete==3.6.2
+asmk @ file:///usr/prakt/s0124/AFM/PathPilot/MASt3R-SLAM/thirdparty/mast3r/asmk
+attrs==25.3.0
+Brotli @ file:///croot/brotli-split_1736182456865/work
+certifi @ file:///croot/certifi_1745939216646/work/certifi
+charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
+click==8.2.1
+colorama==0.4.6
+colorlog==6.9.0
+contourpy==1.3.2
+curope @ file:///usr/prakt/s0124/AFM/PathPilot/MASt3R-SLAM/thirdparty/mast3r/dust3r/croco/models/curope
+cycler==0.12.1
+einops==0.8.1
+embreex==2.17.7.post6
+evo==1.31.1
+faiss-cpu==1.11.0
+fastapi==0.115.12
+ffmpy==0.6.0
+filelock @ file:///croot/filelock_1744281381737/work
+fonttools==4.58.2
+fsspec==2025.5.1
+glcontext==3.0.0
+glfw==2.9.0
+gmpy2 @ file:///croot/gmpy2_1738085463648/work
+gradio==5.33.0
+gradio_client==1.10.2
+groovy==0.1.2
+grpcio==1.73.0
+h11==0.16.0
+hf-xet==1.1.3
+httpcore==1.0.9
+httpx==0.28.1
+huggingface-hub==0.32.4
+idna @ file:///croot/idna_1714398848350/work
+imgui @ file:///usr/prakt/s0124/AFM/PathPilot/MASt3R-SLAM/thirdparty/in3d/thirdparty/pyimgui
+Jinja2 @ file:///croot/jinja2_1741710844255/work
+joblib==1.5.1
+jsonschema==4.24.0
+jsonschema-specifications==2025.4.1
+kiwisolver==1.4.8
+lietorch @ git+https://github.com/princeton-vl/lietorch.git@e7df86554156b36846008d8ddbcc4d8521a16554
+lxml==5.4.0
+lz4==4.4.4
+manifold3d==3.1.1
+mapbox_earcut==1.0.3
+Markdown==3.8
+markdown-it-py==3.0.0
+MarkupSafe @ file:///croot/markupsafe_1738584038848/work
+matplotlib==3.10.3
+mdurl==0.1.2
+mkl-service==2.4.0
+mkl_fft @ file:///io/mkl313/mkl_fft_1730824109137/work
+mkl_random @ file:///io/mkl313/mkl_random_1730823916628/work
+moderngl==5.12.0
+moderngl-window==2.4.6
+mpmath @ file:///croot/mpmath_1690848262763/work
+msgpack==1.1.0
+multipledispatch==1.0.0
+natsort==8.4.0
+networkx @ file:///croot/networkx_1737039604450/work
+numexpr==2.11.0
+numpy==1.26.4
+opencv-python==4.11.0.86
+orjson==3.10.18
+packaging==25.0
+pandas==2.3.0
+pillow @ file:///croot/pillow_1744613067434/work
+plyfile==1.1.2
+protobuf==6.31.1
+pyaml==25.5.0
+pycollada==0.9
+pydantic==2.11.5
+pydantic_core==2.33.2
+pydub==0.25.1
+pyglet==2.1.6
+pyglm==2.8.2
+Pygments==2.19.1
+pyparsing==3.2.3
+pyrealsense2==2.55.1.6486
+pyrr==0.10.3
+PySocks @ file:///work/ci_py311/pysocks_1676822712504/work
+python-dateutil==2.9.0.post0
+python-multipart==0.0.20
+pytz==2025.2
+#PyYAML @ file:///croot/pyyaml_1728657952215/work
+referencing==0.36.2
+requests @ file:///croot/requests_1730999120400/work
+rich==14.0.0
+roma==1.5.3
+rosbags==0.10.10
+rpds-py==0.25.1
+rtree==1.4.0
+ruamel.yaml==0.18.14
+ruamel.yaml.clib==0.2.12
+ruff==0.11.13
+safehttpx==0.1.6
+safetensors==0.5.3
+scikit-learn==1.7.0
+scipy==1.15.3
+seaborn==0.13.2
+semantic-version==2.10.0
+shapely==2.1.1
+shellingham==1.5.4
+six==1.17.0
+sniffio==1.3.1
+starlette==0.46.2
+svg.path==6.3
+sympy==1.13.1
+tensorboard==2.19.0
+tensorboard-data-server==0.7.2
+threadpoolctl==3.6.0
+tomlkit==0.13.3
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
+tqdm==4.67.1
+trimesh==4.6.11
+triton==3.1.0
+typer==0.16.0
+typing-inspection==0.4.1
+typing_extensions @ file:///croot/typing_extensions_1734714854207/work
+tzdata==2025.2
+urllib3 @ file:///croot/urllib3_1737133630106/work
+uvicorn==0.34.3
+vhacdx==0.0.8.post2
+websockets==15.0.1
+Werkzeug==3.1.3
+xxhash==3.5.0
+zstandard==0.23.0
