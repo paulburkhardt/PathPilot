@@ -831,9 +831,7 @@ class SLAMOutputVisualizer:
         # Get percentage to keep
         subsample_percentage = self.config.get('subsample_percentage', 0.6)
         target_points = int(len(points) * subsample_percentage)
-        
-        print(f"DEBUG: Using subsample_percentage={subsample_percentage} from config (target: {subsample_percentage*100:.1f}%)")
-        
+                
         # If we already have fewer points than target, keep all
         if len(points) <= target_points:
             return points, colors
