@@ -61,6 +61,9 @@ class SLAMOutputVisualizer:
         if self.config['show_closest_points']:
             self._load_closest_points()
     
+        if self.config['show_video']:
+            self._load_video_data()
+    
     def _load_metadata(self) -> None:
         """Load metadata.json if available."""
         metadata_path = self.output_dir / "metadata.json"
@@ -406,6 +409,70 @@ class SLAMOutputVisualizer:
         else:
             print("No closest points data file found")
     
+    def _load_video_data(self) -> None:
+        """Load video data from pipeline configuration."""
+        # Extract video path from pipeline configuration
+        video_path = self._get_video_path_from_config()
+        
+        if not video_path:
+            print("No video path found in pipeline configuration")
+            return
+        
+        # Make path relative to the script's location if it's not absolute
+        if not Path(video_path).is_absolute():
+            # Try relative to current working directory first
+            video_file = Path(video_path)
+            if not video_file.exists():
+                # Try relative to the output directory
+                video_file = self.output_dir.parent / video_path
+                if not video_file.exists():
+                    # Try relative to the script's directory
+                    script_dir = Path(__file__).parent
+                    video_file = script_dir / video_path
+        else:
+            video_file = Path(video_path)
+        
+        # Check for rerun-compatible version first (converted by separate script)
+        compatible_video_file = video_file.parent / f"{video_file.stem}_rerun_compatible.mp4"
+        
+        if compatible_video_file.exists():
+            print(f"Found rerun-compatible video: {compatible_video_file}")
+            video_file = compatible_video_file
+        elif video_file.exists():
+            print(f"Using original video: {video_file}")
+            print("  Note: If video doesn't play, run: python convert_videos_for_rerun.py Data/Videos/")
+        else:
+            print(f"Warning: Video file not found: {video_file}")
+            if not compatible_video_file.exists():
+                print(f"  Also checked for: {compatible_video_file}")
+            return
+        
+        try:
+            # Store video information for later use in visualization
+            self.data['video'] = {
+                'path': str(video_file),
+                'video_path_config': video_path  # Store original config path for reference
+            }
+            print(f"Video ready for visualization: {video_file}")
+        except Exception as e:
+            print(f"Failed to load video data: {e}")
+
+    def _get_video_path_from_config(self) -> Optional[str]:
+        """Extract video path from pipeline configuration."""
+        if 'pipeline_configuration' not in self.data['metadata']:
+            return None
+        
+        pipeline_config = self.data['metadata']['pipeline_configuration']
+        
+        # Look for MAST3RSLAMVideoDataset component configuration
+        if 'pipeline' in pipeline_config and 'components' in pipeline_config['pipeline']:
+            for component in pipeline_config['pipeline']['components']:
+                if component.get('type') == 'MAST3RSLAMVideoDataset':
+                    component_config = component.get('config', {})
+                    return component_config.get('video_path')
+        
+        return None
+    
     def visualize(self) -> None:
         """Visualize all loaded data in rerun."""
         print("Starting visualization in rerun...")
@@ -428,6 +495,10 @@ class SLAMOutputVisualizer:
                 print(f"Failed to spawn rerun viewer: {e2}")
                 print("Please start rerun viewer manually with: rerun")
                 return
+        
+        # Visualize video first (static)
+        if self.config['show_video'] and 'video' in self.data:
+            self._visualize_video()
         
         # Visualize static data first
         if self.config['show_point_cloud'] and 'point_cloud' in self.data:
@@ -592,8 +663,6 @@ class SLAMOutputVisualizer:
         # Log temporal poses
         self._log_temporal_poses(positions, quaternions, timestamps, closest_points_data)
         
-        # Log summary statistics
-        self._log_trajectory_statistics(positions, timestamps, closest_points_data)
     
     def _prepare_closest_points_data(self, num_poses: int) -> Dict[str, np.ndarray]:
         """Prepare closest points data for visualization."""
@@ -680,10 +749,24 @@ class SLAMOutputVisualizer:
                 temporal_point_clouds['steps'], len(positions)
             )
         
+        # Prepare video frame data if available
+        video_frame_mapping = None
+        if 'video' in self.data:
+            video_frame_mapping = self._map_trajectory_to_video_frames(len(positions))
+        
         for i, (timestamp, position, quaternion) in enumerate(zip(timestamps, positions, quaternions)):
             # Set timeline
             rr.set_time("timestamp", timestamp=timestamp)
             rr.set_time("frame", sequence=i)
+            
+            # Log video frame if available
+            if video_frame_mapping and i < len(video_frame_mapping):
+                video_timestamp_ns = video_frame_mapping[i]
+                if video_timestamp_ns is not None:
+                    rr.log("video/frame", rr.VideoFrameReference(
+                        timestamp=rr.datatypes.VideoTimestamp(timestamp_ns=video_timestamp_ns),
+                        video_reference="video/asset"
+                    ))
             
             # Log temporal point cloud if available for this step
             if temporal_point_clouds and step_to_trajectory_mapping:
@@ -1105,28 +1188,74 @@ class SLAMOutputVisualizer:
                 radii=[0.002]
             ))
     
-    def _log_trajectory_statistics(self, positions: np.ndarray, timestamps: np.ndarray,
-                                  closest_points_data: Optional[Dict]) -> None:
-        """Log summary statistics."""
-        print("\n=== TRAJECTORY SUMMARY STATISTICS ===")
-        print(f"Total trajectory duration: {timestamps[-1] - timestamps[0]:.2f} seconds")
-        print(f"Number of poses: {len(timestamps)}")
+
+    def _map_trajectory_to_video_frames(self, num_poses: int) -> Optional[List[Optional[int]]]:
+        """Map trajectory steps to video frames using step-based division."""
+        if 'video' not in self.data or 'frame_timestamps' not in self.data['video']:
+            return None
         
-        # Log basic statistics
-        rr.log("stats/trajectory_duration", rr.Scalars(scalars=[timestamps[-1] - timestamps[0]]))
-        rr.log("stats/num_poses", rr.Scalars(scalars=[len(positions)]))
+        video_timestamps_ns = self.data['video']['frame_timestamps']
+        num_video_frames = len(video_timestamps_ns)
         
-        if closest_points_data is not None:
-            distances = closest_points_data['distances']
-            print(f"Average distance to closest point: {distances.mean():.3f}m")
-            print(f"Minimum distance: {distances.min():.3f}m")
-            print(f"Maximum distance: {distances.max():.3f}m")
-            print(f"Standard deviation: {distances.std():.3f}m")
+        if num_video_frames == 0:
+            return None
+        
+        print(f"Step-based mapping: {num_poses} trajectory poses to {num_video_frames} video frames")
+        
+        # Calculate the step size for video frames
+        # We want to map the entire trajectory to the entire video
+        if num_poses <= 1:
+            # Special case: only one pose, use first frame
+            return [video_timestamps_ns[0]]
+        
+        # Map trajectory steps evenly across video frames
+        frame_mapping = []
+        
+        for i in range(num_poses):
+            # Calculate progress through trajectory (0.0 to 1.0)
+            progress = i / (num_poses - 1)
             
-            # Log distance statistics
-            rr.log("stats/average_distance", rr.Scalars(scalars=[distances.mean()]))
-            rr.log("stats/min_distance", rr.Scalars(scalars=[distances.min()]))
-            rr.log("stats/max_distance", rr.Scalars(scalars=[distances.max()]))
+            # Map to video frame index
+            video_frame_idx = int(progress * (num_video_frames - 1))
+            video_frame_idx = min(video_frame_idx, num_video_frames - 1)  # Clamp to valid range
+            
+            # Get the timestamp for this frame
+            frame_timestamp_ns = video_timestamps_ns[video_frame_idx]
+            frame_mapping.append(frame_timestamp_ns)
+        
+        # Log mapping statistics
+        unique_frames = len(set(frame_mapping))
+        print(f"Mapped trajectory steps to {unique_frames} unique video frames")
+        print(f"Video frame step size: {num_video_frames / num_poses:.2f} frames per trajectory step")
+        
+        return frame_mapping
+
+    def _visualize_video(self) -> None:
+        """Visualize the video as a static asset and prepare frame references."""
+        video_path = self.data['video']['path']
+        
+        print(f"Loading video asset: {video_path}")
+        
+        try:
+            # Log video asset (static)
+            video_asset = rr.AssetVideo(path=video_path)
+            rr.log("video/asset", video_asset, static=True)
+            
+            # Store video asset for frame reference generation
+            self.data['video']['asset'] = video_asset
+            self.data['video']['frame_timestamps'] = video_asset.read_frame_timestamps_nanos()
+            
+            print(f"Loaded video with {len(self.data['video']['frame_timestamps'])} frames")
+            
+        except Exception as e:
+            print(f"Failed to load video asset: {e}")
+            # Remove video from data so we don't try to use it later
+            if 'video' in self.data:
+                del self.data['video']
+
+
+
+
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -1137,15 +1266,18 @@ def parse_arguments() -> argparse.Namespace:
         epilog="""
 Examples:
     python visualize_slam_output.py ./enhanced_slam_outputs/slam_analysis_20240115_143045
-    python visualize_slam_output.py ./outputs --no-view-cones --no-floor
+    python visualize_slam_output.py ./outputs --no-view-cones --no-floor --no-video
     python visualize_slam_output.py ./outputs --cone-angle 45 --grid-size 5.0
     python visualize_slam_output.py ./outputs --subsample-percentage 0.8 --voxel-size 0.15
+    python visualize_slam_output.py ./outputs --subsample-percentage 0.8
     
 Note: 
 - View cone settings will be automatically configured from pipeline metadata if available.
 - Point cloud subsampling uses percentage-based reduction to maintain consistent density across steps.
 - The final temporal step always shows 100% of points, earlier steps show the specified percentage.
 - Use --no-subsampling to disable subsampling (may cause memory issues with large temporal datasets).
+- Video synchronization uses step-based mapping: trajectory steps are evenly distributed across video frames.
+- Video will be automatically loaded from pipeline configuration if available.
         """
     )
     
@@ -1172,6 +1304,8 @@ Note:
                        help='Disable distance lines to closest points')
     parser.add_argument('--no-highlight-floor', action='store_true',
                        help='Disable floor point highlighting')
+    parser.add_argument('--no-video', action='store_true',
+                       help='Disable video visualization')
     
     # Visualization parameters
     parser.add_argument('--floor-threshold', type=float, default=0.05,
@@ -1193,6 +1327,10 @@ Note:
     parser.add_argument('--no-subsampling', action='store_true',
                        help='Disable point cloud subsampling (may cause memory issues with large datasets)')
     
+    # Video synchronization parameters  
+    parser.add_argument('--video-sync-tolerance', type=float, default=1.0,
+                       help='(Deprecated - now using step-based sync) Maximum time difference (seconds) to consider trajectory and video frames synchronized')
+    
     return parser.parse_args()
 
 
@@ -1210,6 +1348,7 @@ def main():
         'show_trajectory_path': not args.no_trajectory_path,
         'show_distance_lines': not args.no_distance_lines,
         'highlight_floor_points': not args.no_highlight_floor,
+        'show_video': not args.no_video,
         'floor_threshold': args.floor_threshold,
         'grid_size': args.grid_size,
         'view_cone_angle': args.cone_angle,
@@ -1217,7 +1356,8 @@ def main():
         'max_cone_length': args.max_cone_length,
         'subsample_percentage': args.subsample_percentage,
         'voxel_size': args.voxel_size,
-        'enable_subsampling': not args.no_subsampling
+        'enable_subsampling': not args.no_subsampling,
+        'video_sync_tolerance': args.video_sync_tolerance
     }
     
     try:
