@@ -246,31 +246,75 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         confidence = None
         if hasattr(self.final_point_cloud, 'confidence_scores_numpy'):
             confidence = self.final_point_cloud.confidence_scores_numpy
+
+        segmentation = None
+        if hasattr(self.final_point_cloud, "segmentation_mask_numpy"):
+            segmentation = self.final_point_cloud.segmentation_mask_numpy
+        
         
         ply_path = self.final_output_dir / f"{self.output_name}_pointcloud.ply"
         
         print(f"Saving point cloud with {len(points)} points to: {ply_path}")
         
         # Prepare vertex data
-        if colors is not None and confidence is not None:
+        if colors is not None and confidence is not None and segmentation is not None:
             vertex_data = [
-                (points[i, 0], points[i, 1], points[i, 2],
-                 colors[i, 0], colors[i, 1], colors[i, 2], confidence[i])
-                for i in range(len(points))
+            (points[i, 0], points[i, 1], points[i, 2],
+             colors[i, 0], colors[i, 1], colors[i, 2], confidence[i], segmentation[i])
+            for i in range(len(points))
             ]
             vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-                           ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'), ('confidence', 'f4')]
+                    ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'),
+                    ('confidence', 'f4'), ('segmentation', 'i4')]
+        elif colors is not None and segmentation is not None:
+            vertex_data = [
+            (points[i, 0], points[i, 1], points[i, 2],
+             colors[i, 0], colors[i, 1], colors[i, 2], segmentation[i])
+            for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                    ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'),
+                    ('segmentation', 'i4')]
+        elif confidence is not None and segmentation is not None:
+            vertex_data = [
+            (points[i, 0], points[i, 1], points[i, 2],
+             confidence[i], segmentation[i])
+            for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                    ('confidence', 'f4'), ('segmentation', 'i4')]
+        elif segmentation is not None:
+            vertex_data = [
+            (points[i, 0], points[i, 1], points[i, 2], segmentation[i])
+            for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                    ('segmentation', 'i4')]
+        elif colors is not None and confidence is not None:
+            vertex_data = [
+            (points[i, 0], points[i, 1], points[i, 2],
+             colors[i, 0], colors[i, 1], colors[i, 2], confidence[i])
+            for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                    ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'), ('confidence', 'f4')]
         elif colors is not None:
             vertex_data = [
-                (points[i, 0], points[i, 1], points[i, 2],
-                 colors[i, 0], colors[i, 1], colors[i, 2])
-                for i in range(len(points))
+            (points[i, 0], points[i, 1], points[i, 2],
+             colors[i, 0], colors[i, 1], colors[i, 2])
+            for i in range(len(points))
             ]
             vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-                           ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')]
+                    ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')]
+        elif confidence is not None:
+            vertex_data = [
+            (points[i, 0], points[i, 1], points[i, 2], confidence[i])
+            for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('confidence', 'f4')]
         else:
             vertex_data = [
-                (points[i, 0], points[i, 1], points[i, 2]) for i in range(len(points))
+            (points[i, 0], points[i, 1], points[i, 2]) for i in range(len(points))
             ]
             vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
         

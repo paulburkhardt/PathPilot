@@ -201,6 +201,7 @@ class SLAMOutputVisualizer:
                     point_cloud_data = {
                         'points': np.asarray(pcd.points),
                         'colors': np.asarray(pcd.colors) if pcd.has_colors() else None
+
                     }
                 except ImportError:
                     point_cloud_data = self._parse_ply_file(pointcloud_file)
@@ -227,6 +228,8 @@ class SLAMOutputVisualizer:
         """Basic PLY file parser for when Open3D is not available."""
         points = []
         colors = []
+        classIds = []
+        has_classIds = False
         has_colors = False
         
         with open(ply_file, 'r') as f:
@@ -244,6 +247,8 @@ class SLAMOutputVisualizer:
                 properties.append(line.strip())
                 if 'red' in line or 'green' in line or 'blue' in line:
                     has_colors = True
+                if "segmentation" in line:
+                    has_classIds= True
             elif line.startswith('end_header'):
                 data_start = i + 1
                 break
@@ -259,9 +264,14 @@ class SLAMOutputVisualizer:
                 if has_colors and len(values) >= 6:
                     colors.append([int(values[3]), int(values[4]), int(values[5])])
         
+                # Extract class Ids if available
+                if has_classIds and len(values)>=7:
+                    classIds.append(int(values[6]))
+
         return {
             'points': np.array(points),
-            'colors': np.array(colors) if colors else None
+            'colors': np.array(colors) if colors else None,
+            "classIds": np.array(classIds) if classIds else None,
         }
     
     def _load_trajectory(self) -> None:
@@ -455,18 +465,53 @@ class SLAMOutputVisualizer:
         # Handle static point cloud
         points = point_cloud_data['points']
         colors = point_cloud_data['colors']
+        classIds = point_cloud_data["classIds"]
         
         print(f"Visualizing static point cloud with {len(points)} points...")
         
         # Log basic point cloud
-        if colors is not None and len(colors) > 0:
+        # Optionally color point cloud by classId
+        color_by_class = self.config.get("color_pointcloud_by_classId", False)
+        has_colors = colors is not None and len(colors) > 0
+        has_classIds = classIds is not None and len(classIds) > 0
+
+        if color_by_class and has_classIds:
+            rr.log(
+            "world/pointcloud",
+            rr.Points3D(points, class_ids=classIds),
+            static=True
+            )
+        elif has_colors:
             # Convert colors from [0,1] to [0,255] if needed
             if colors.max() <= 1.0:
                 colors = (colors * 255).astype(np.uint8)
-            rr.log("world/pointcloud", rr.Points3D(points, colors=colors), static=True)
+            if has_classIds:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=colors, class_ids=classIds),
+                    static=True
+                )
+            else:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=colors),
+                    static=True
+                )
         else:
-            rr.log("world/pointcloud", rr.Points3D(points, colors=[128, 128, 128]), static=True)
-        
+            default_color = [128, 128, 128]
+            if has_classIds:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=default_color, class_ids=classIds),
+                    static=True
+                )
+            else:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=default_color),
+                    static=True
+                )
+
         # Highlight floor points if floor data is available
         if self.config['highlight_floor_points'] and 'floor' in self.data:
             self._highlight_floor_points(points, colors)
