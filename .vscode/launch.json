@@ -69,13 +69,14 @@
             "justMyCode": false
         },
         {
-            "name": "Python Debugger: Visualize",
+            "name": "Python Debugger: Visualize (Color by class id)",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/visualize_slam_output.py",
             "console": "integratedTerminal",
             "args": [
                 "enhanced_slam_outputs/run_34/incremental_analysis_detailed_20250626_154147",
+                "--color_pointcloud_by_classIds"
             ],
             "justMyCode": false
         },
