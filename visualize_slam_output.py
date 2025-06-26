@@ -37,6 +37,13 @@ class SLAMOutputVisualizer:
         self.config = config
         self.data = {}
         
+        # Warning system state tracking
+        self.warning_state = {
+            'previous_distance': None,
+            'previous_warning_level': 'normal',
+            'frame_count': 0
+        }
+        
         # Validate output directory
         if not self.output_dir.exists():
             raise ValueError(f"Output directory does not exist: {output_dir}")
@@ -797,28 +804,56 @@ class SLAMOutputVisualizer:
                     has_valid_data = closest_points_data['valid_mask'][i]
                 
                 if has_valid_data and distance > 0:  # Only show if we have real data
-                    # Log closest point
+                    # Update warning system state
+                    self.warning_state['frame_count'] += 1
+                    
+                    # Calculate warning level
+                    warning_level = self._calculate_warning_level(distance)
+                    
+                    # Calculate direction to closest point
+                    direction = ""
+                    if self.config['enable_directional_warnings']:
+                        direction = self._calculate_direction_to_point(position, quaternion, closest_point)
+                    
+                    # Generate warning message
+                    warning_message = self._generate_warning_message(
+                        distance, direction, warning_level
+                    )
+                    
+                    # Get warning-appropriate colors and styling
+                    warning_colors = self._get_warning_colors(warning_level)
+                    warning_radius = self._get_warning_radius(warning_level)
+                    
+                    # Log closest point with warning-appropriate styling
                     rr.log("world/closest_point", rr.Points3D(
                         positions=closest_point.reshape(1, 3),
-                        colors=[0, 255, 0],  # Green for closest point
-                        radii=[0.025]
+                        colors=warning_colors,
+                        radii=[warning_radius]
                     ))
                     
-                    # Log distance line
+                    # Log distance line with warning colors
                     if self.config['show_distance_lines']:
+                        line_colors = warning_colors if warning_level != 'normal' else [255, 255, 0]
+                        line_width = 0.008 if warning_level in ['strong', 'critical'] else 0.005
                         rr.log("world/distance_line", rr.LineStrips3D(
                             strips=[np.array([position, closest_point])],
-                            colors=[255, 255, 0],  # Yellow line
-                            radii=[0.005]
+                            colors=line_colors,
+                            radii=[line_width]
                         ))
                     
                     # Log distance plot
                     rr.log("plots/distance_to_closest", rr.Scalars(scalars=[distance]))
                     
-                    # Log distance text
-                    rr.log("world/distance_text", rr.TextDocument(
-                        f"Distance to closest: {distance:.3f}m"
-                    ))
+                    # Log warning level plot
+                    warning_level_numeric = {'normal': 0, 'caution': 1, 'strong': 2, 'critical': 3}
+                    rr.log("plots/warning_level", rr.Scalars(scalars=[warning_level_numeric[warning_level]]))
+                    
+                    # Log enhanced warning message
+                    rr.log("world/distance_text", rr.TextDocument(warning_message))
+                    
+                    # Update warning state for next frame
+                    self.warning_state['previous_distance'] = distance
+                    self.warning_state['previous_warning_level'] = warning_level
                 else:
                     # Clear visualizations for poses without valid data
                     rr.log("world/closest_point", rr.Clear(recursive=False))
@@ -1188,6 +1223,146 @@ class SLAMOutputVisualizer:
                 radii=[0.002]
             ))
     
+    def _calculate_warning_level(self, distance: float) -> str:
+        """Calculate warning level based on distance thresholds."""
+        if distance <= self.config['warning_distance_critical']:
+            return 'critical'
+        elif distance <= self.config['warning_distance_strong']:
+            return 'strong'
+        elif distance <= self.config['warning_distance_caution']:
+            return 'caution'
+        else:
+            return 'normal'
+    
+    def _calculate_direction_to_point(self, camera_position: np.ndarray, camera_quaternion: np.ndarray, 
+                                    closest_point: np.ndarray) -> str:
+        """Calculate direction from camera to closest point in human-readable terms."""
+        # Convert quaternion to rotation matrix (same as in _log_view_cone)
+        qx, qy, qz, qw = camera_quaternion
+        
+        # Normalize quaternion
+        norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
+        if norm > 0:
+            qx, qy, qz, qw = qx/norm, qy/norm, qz/norm, qw/norm
+        
+        # Convert to rotation matrix
+        R = np.array([
+            [1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
+            [2*(qx*qy + qz*qw), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw)],
+            [2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx*qx + qy*qy)]
+        ])
+        
+        # Calculate vector from camera to closest point
+        to_point = closest_point - camera_position
+        
+        # Transform to camera coordinate system
+        # Camera coordinates: X=right, Y=up, Z=forward
+        camera_coords = R.T @ to_point
+        
+        # Determine primary direction components
+        x, y, z = camera_coords
+        
+        # Create direction description
+        direction_parts = []
+        
+        # Front/Back (Z-axis)
+        if abs(z) > 0.1:  # Threshold to avoid noise
+            if z > 0:
+                direction_parts.append("ahead")
+            else:
+                direction_parts.append("behind")
+        
+        # Left/Right (X-axis)
+        if abs(x) > 0.1:
+            if x > 0:
+                direction_parts.append("right")
+            else:
+                direction_parts.append("left")
+        
+        # Up/Down (Y-axis)
+        if abs(y) > 0.1:
+            if y > 0:
+                direction_parts.append("below")
+            else:
+                direction_parts.append("above")
+        
+        # Combine directions intelligently
+        if len(direction_parts) == 0:
+            return "directly in front"
+        elif len(direction_parts) == 1:
+            return f"to your {direction_parts[0]}"
+        elif len(direction_parts) == 2:
+            # For two directions, combine them naturally
+            if "ahead" in direction_parts or "behind" in direction_parts:
+                front_back = next((d for d in direction_parts if d in ["ahead", "behind"]), "")
+                other = next((d for d in direction_parts if d not in ["ahead", "behind"]), "")
+                return f"{front_back}-{other}"
+            else:
+                return f"{direction_parts[0]}-{direction_parts[1]}"
+        else:
+            # Three directions - combine all
+            return f"{direction_parts[0]}-{direction_parts[1]}-{direction_parts[2]}"
+    
+
+    
+    def _generate_warning_message(self, distance: float, direction: str, 
+                                warning_level: str) -> str:
+        """Generate appropriate warning message based on context."""
+        if not self.config['enable_warnings']:
+            return f"Distance: {distance:.3f}m"
+        
+        # Format distance
+        distance_str = f"{distance:.2f}m"
+        
+        # Base message components
+        warning_prefixes = {
+            'normal': "",
+            'caution': "⚠️ CAUTION: ",
+            'strong': "⚠️ WARNING: ",
+            'critical': "🚨 CRITICAL: "
+        }
+        
+        # Build message
+        prefix = warning_prefixes[warning_level]
+        
+        if warning_level == 'normal':
+            if self.config['enable_directional_warnings'] and direction:
+                return f"Distance: {distance_str} ({direction})"
+            else:
+                return f"Distance: {distance_str}"
+        
+        # Warning messages
+        if self.config['enable_directional_warnings'] and direction:
+            if warning_level == 'critical':
+                return f"{prefix}Object {distance_str} {direction}!"
+            else:
+                return f"{prefix}Object {distance_str} {direction}"
+        else:
+            if warning_level == 'critical':
+                return f"{prefix}Object at {distance_str}!"
+            else:
+                return f"{prefix}Object at {distance_str}"
+    
+    def _get_warning_colors(self, warning_level: str) -> Tuple[int, int, int]:
+        """Get color scheme for warning level."""
+        warning_colors = {
+            'normal': [0, 255, 0],      # Green
+            'caution': [255, 255, 0],   # Yellow  
+            'strong': [255, 165, 0],    # Orange
+            'critical': [255, 0, 0]     # Red
+        }
+        return warning_colors.get(warning_level, [0, 255, 0])
+    
+    def _get_warning_radius(self, warning_level: str) -> float:
+        """Get point radius based on warning level."""
+        warning_radii = {
+            'normal': 0.025,
+            'caution': 0.035,
+            'strong': 0.045,
+            'critical': 0.055
+        }
+        return warning_radii.get(warning_level, 0.025)
+    
 
     def _map_trajectory_to_video_frames(self, num_poses: int) -> Optional[List[Optional[int]]]:
         """Map trajectory steps to video frames using step-based division."""
@@ -1270,6 +1445,9 @@ Examples:
     python visualize_slam_output.py ./outputs --cone-angle 45 --grid-size 5.0
     python visualize_slam_output.py ./outputs --subsample-percentage 0.8 --voxel-size 0.15
     python visualize_slam_output.py ./outputs --subsample-percentage 0.8
+    python visualize_slam_output.py ./outputs --warning-distance-critical 0.15 --warning-distance-caution 0.8
+    python visualize_slam_output.py ./outputs --no-warnings
+    python visualize_slam_output.py ./outputs --no-directional-warnings
     
 Note: 
 - View cone settings will be automatically configured from pipeline metadata if available.
@@ -1278,6 +1456,9 @@ Note:
 - Use --no-subsampling to disable subsampling (may cause memory issues with large temporal datasets).
 - Video synchronization uses step-based mapping: trajectory steps are evenly distributed across video frames.
 - Video will be automatically loaded from pipeline configuration if available.
+- Warning system provides proximity alerts with color-coded visualization and directional guidance.
+- Warning levels: Normal (>0.6m, green), Caution (0.4-0.6m, yellow), Strong (0.2-0.4m, orange), Critical (<0.2m, red).
+
         """
     )
     
@@ -1331,6 +1512,18 @@ Note:
     parser.add_argument('--video-sync-tolerance', type=float, default=1.0,
                        help='(Deprecated - now using step-based sync) Maximum time difference (seconds) to consider trajectory and video frames synchronized')
     
+    # Warning system parameters
+    parser.add_argument('--warning-distance-critical', type=float, default=0.2,
+                       help='Distance threshold for critical warnings (meters)')
+    parser.add_argument('--warning-distance-strong', type=float, default=0.4,
+                       help='Distance threshold for strong warnings (meters)')
+    parser.add_argument('--warning-distance-caution', type=float, default=0.6,
+                       help='Distance threshold for caution warnings (meters)')
+    parser.add_argument('--no-warnings', action='store_true',
+                       help='Disable proximity warning system')
+    parser.add_argument('--no-directional-warnings', action='store_true',
+                       help='Disable directional warnings (show distance only)')
+    
     return parser.parse_args()
 
 
@@ -1357,7 +1550,13 @@ def main():
         'subsample_percentage': args.subsample_percentage,
         'voxel_size': args.voxel_size,
         'enable_subsampling': not args.no_subsampling,
-        'video_sync_tolerance': args.video_sync_tolerance
+        'video_sync_tolerance': args.video_sync_tolerance,
+        # Warning system configuration
+        'enable_warnings': not args.no_warnings,
+        'enable_directional_warnings': not args.no_directional_warnings,
+        'warning_distance_critical': args.warning_distance_critical,
+        'warning_distance_strong': args.warning_distance_strong,
+        'warning_distance_caution': args.warning_distance_caution
     }
     
     try:
