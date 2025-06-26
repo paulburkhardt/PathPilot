@@ -1,0 +1,16 @@
+pipeline:
+    components:
+        - type: MAST3RSLAMVideoDataset
+          config:
+            video_path: /usr/prakt/s0120/PathPilot/data/videos/chair_trash_walking.mp4
+            mast3r_slam_config_path: "/usr/prakt/s0120/PathPilot/configs/MASt3R-SLAM_configs/no_calib.yaml"
+        - type: ImageDataSegmenter
+          config:
+            model_cfg_path: "sam2.1/sam2.1_hiera_t.yaml"
+            checkpoint_path: "segment-anything-2/checkpoints/sam2.1_hiera_tiny.pt"
+            automask_interval: 30
+            number_of_objects: 10
+            min_mask_region_area : 500     
+        - type: MaskDataWriter
+          config:
+            output_dir: outputs/test_4

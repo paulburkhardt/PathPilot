@@ -22,6 +22,8 @@ class PipelineDataBucket:
         "image_width",
         "image_size",
 
+        "segmentation_masks",
+
         "point_cloud",
         "camera_pose",
         "timestamp",
