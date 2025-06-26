@@ -19,7 +19,7 @@ pipeline:
         min_frames: 3  # Wait for 3 frames before starting
         sample_ratio: 0.15  # Slightly more points for better accuracy
         ransac_threshold: 0.05
-        min_inliers: 1000
+        min_inliers: 250  # Reduced from 1000 to allow detection with fewer points
         floor_threshold: 0.05
         refine_interval: 10  # Refine every 10 frames for better accuracy
         max_refinement_poses: 30  # Use last 30 poses for refinement
@@ -27,9 +27,10 @@ pipeline:
     # Find closest points incrementally - waits for floor detection
     - type: IncrementalClosestPointFinderComponent
       config:
-        use_view_cone: false  # Set to true to enable view cone filtering
-        cone_angle_deg: 60.0
-        
+        use_view_cone: true  # Re-enabled with optimized filtering
+        cone_angle_deg: 60.0  # This is the half-angle (120° total cone)
+        n_closest_points: 20
+    
     # Enhanced output writer with intermediate saving enabled
     - type: EnhancedSLAMOutputWriter
       config:
@@ -40,6 +41,5 @@ pipeline:
         save_floor_data: true
         save_closest_points: true
         save_intermediate: true  # Save intermediate results
-        intermediate_interval: 10   # Save intermediate results every 5 frames
         create_timestamped_dir: true
         analysis_format: "csv"  # Can be "json" or "csv" 
