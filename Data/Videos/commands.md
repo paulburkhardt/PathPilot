@@ -5,6 +5,7 @@
 salloc --nodes=1 --cpus-per-task=4 --mem=32G --gres=gpu:1,VRAM:24G --time=6:00:00 --mail-type=ALL  --part=PRACT --qos="practical_course"
 ```
 
+
 ## Activate the conda environment
 ```
 conda activate mast3r-slam

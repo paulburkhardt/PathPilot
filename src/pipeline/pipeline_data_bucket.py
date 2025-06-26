@@ -38,7 +38,8 @@ class PipelineDataBucket:
         "view_cone_mask",
 
         "image_segmentation_mask",
-        "point_cloud_segmentation_mask"
+        "point_cloud_segmentation_mask",
+        "floor_filtered_mask"
     ]
     
     def __init__(self) -> None:

@@ -7,6 +7,7 @@ from datetime import datetime
 import pathlib
 from plyfile import PlyElement, PlyData
 from .abstract_data_writer import AbstractDataWriter
+from omegaconf import DictConfig, OmegaConf
 
 
 class EnhancedSLAMOutputWriter(AbstractDataWriter):
@@ -377,11 +378,37 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             points = self.final_point_cloud.point_cloud_numpy
         else:
             points = self.final_point_cloud
+            
+        colors = None
+        if hasattr(self.final_point_cloud, 'rgb_numpy'):
+            colors = self.final_point_cloud.rgb_numpy
+            
+        confidence = None
+        if hasattr(self.final_point_cloud, 'confidence_scores_numpy'):
+            confidence = self.final_point_cloud.confidence_scores_numpy
         
         ply_path = output_dir / "pointcloud.ply"
         
-        vertex_data = [(points[i, 0], points[i, 1], points[i, 2]) for i in range(len(points))]
-        vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
+        # Prepare vertex data with colors and confidence if available
+        if colors is not None and confidence is not None:
+            vertex_data = [
+                (points[i, 0], points[i, 1], points[i, 2],
+                 colors[i, 0], colors[i, 1], colors[i, 2], confidence[i])
+                for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                           ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'), ('confidence', 'f4')]
+        elif colors is not None:
+            vertex_data = [
+                (points[i, 0], points[i, 1], points[i, 2],
+                 colors[i, 0], colors[i, 1], colors[i, 2])
+                for i in range(len(points))
+            ]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                           ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')]
+        else:
+            vertex_data = [(points[i, 0], points[i, 1], points[i, 2]) for i in range(len(points))]
+            vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
         
         vertex_array = np.array(vertex_data, dtype=vertex_dtype)
         vertex_element = PlyElement.describe(vertex_array, 'vertex')
@@ -424,6 +451,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "analysis_format": self.analysis_format,
                 "output_name": self.output_name
             },
+            "pipeline_configuration": self._format_pipeline_config() if self.full_pipeline_config is not None else {},
             "data_summary": {
                 "total_poses": len(self.accumulated_timestamps),
                 "trajectory_duration": (max(self.accumulated_timestamps) - min(self.accumulated_timestamps)) if len(self.accumulated_timestamps) > 1 else 0,
@@ -446,6 +474,42 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2) 
+
+    def _format_pipeline_config(self) -> Dict[str, Any]:
+        """Format the pipeline configuration for cleaner metadata output."""
+        if self.full_pipeline_config is None:
+            return {}
+        
+        # Convert DictConfig to regular dict if needed
+        if isinstance(self.full_pipeline_config, DictConfig):
+            config_dict = OmegaConf.to_container(self.full_pipeline_config, resolve=True)
+        else:
+            config_dict = self.full_pipeline_config
+        
+        # Create a clean copy of the configuration
+        formatted_config = {}
+        
+        # Add pipeline structure
+        if "pipeline" in config_dict:
+            pipeline_config = config_dict["pipeline"]
+            formatted_config["pipeline"] = {
+                "components": []
+            }
+            
+            # Format each component configuration
+            for component_config in pipeline_config.get("components", []):
+                component_info = {
+                    "type": component_config.get("type", "Unknown"),
+                    "config": component_config.get("config", {})
+                }
+                formatted_config["pipeline"]["components"].append(component_info)
+        
+        # Add any other top-level configuration keys
+        for key, value in config_dict.items():
+            if key != "pipeline":
+                formatted_config[key] = value
+        
+        return formatted_config
 
     def _calculate_distance_stats(self, stat: str) -> float:
         """Calculate distance statistics from arrays of n closest point distances."""

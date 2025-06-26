@@ -17,6 +17,7 @@ import numpy as np
 import rerun as rr
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
+import re
 
 
 class SLAMOutputVisualizer:
@@ -67,12 +68,54 @@ class SLAMOutputVisualizer:
             with open(metadata_path, 'r') as f:
                 self.data['metadata'] = json.load(f)
             print(f"Loaded metadata from {metadata_path}")
+            
+            # Update visualization config based on pipeline configuration
+            self._update_config_from_metadata()
         else:
             print("No metadata.json found, will search for standard file names")
             self.data['metadata'] = {}
     
+    def _update_config_from_metadata(self) -> None:
+        """Update visualization configuration based on pipeline metadata."""
+        if 'pipeline_configuration' not in self.data['metadata']:
+            return
+        
+        pipeline_config = self.data['metadata']['pipeline_configuration']
+        
+        # Look for IncrementalClosestPointFinderComponent configuration
+        if 'pipeline' in pipeline_config and 'components' in pipeline_config['pipeline']:
+            for component in pipeline_config['pipeline']['components']:
+                if component.get('type') == 'IncrementalClosestPointFinderComponent':
+                    component_config = component.get('config', {})
+                    
+                    # Override view cone settings from pipeline config
+                    use_view_cone = component_config.get('use_view_cone', False)
+                    cone_angle = component_config.get('cone_angle_deg', 90.0)
+                    
+                    # Update visualization config
+                    # If view cones were enabled in pipeline but user didn't explicitly disable them
+                    if use_view_cone and not hasattr(self, '_user_disabled_view_cones'):
+                        self.config['show_view_cones'] = True
+                    elif not use_view_cone:
+                        self.config['show_view_cones'] = False
+                    
+                    self.config['view_cone_angle'] = cone_angle
+                    
+                    print(f"Updated view cone settings from pipeline config: enabled={self.config['show_view_cones']}, angle={cone_angle}°")
+                    break
+    
     def _load_point_cloud(self) -> None:
-        """Load point cloud from PLY file."""
+        """Load point cloud(s) from PLY file(s), including intermediate step point clouds."""
+        # First, try to load intermediate point clouds
+        intermediate_point_clouds = self._load_intermediate_point_clouds()
+        
+        if intermediate_point_clouds:
+            # Use intermediate point clouds for temporal visualization
+            self.data['point_cloud'] = intermediate_point_clouds
+            print(f"Loaded {len(intermediate_point_clouds['steps'])} intermediate point clouds")
+            return
+        
+        # Fallback to loading single final point cloud
         # Try to get path from metadata, otherwise use standard name
         if 'file_paths' in self.data['metadata']:
             pc_file = Path(self.data['metadata']['file_paths'].get('point_cloud_path', ''))
@@ -101,17 +144,84 @@ class SLAMOutputVisualizer:
                     pcd = o3d.io.read_point_cloud(str(pc_file))
                     self.data['point_cloud'] = {
                         'points': np.asarray(pcd.points),
-                        'colors': np.asarray(pcd.colors) if pcd.has_colors() else None
+                        'colors': np.asarray(pcd.colors) if pcd.has_colors() else None,
+                        'is_temporal': False  # Mark as static point cloud
                     }
                 except ImportError:
                     print("Open3D not available, using basic PLY parsing")
-                    self.data['point_cloud'] = self._parse_ply_file(pc_file)
+                    point_cloud_data = self._parse_ply_file(pc_file)
+                    point_cloud_data['is_temporal'] = False
+                    self.data['point_cloud'] = point_cloud_data
                 
                 print(f"Loaded point cloud with {len(self.data['point_cloud']['points'])} points from {pc_file}")
             except Exception as e:
                 print(f"Failed to load point cloud from {pc_file}: {e}")
         else:
             print(f"Point cloud file not found: {pc_file}")
+    
+    def _load_intermediate_point_clouds(self) -> Optional[Dict[str, Any]]:
+        """Load intermediate point clouds from step directories."""
+        intermediate_dir = self.output_dir / "intermediate"
+        if not intermediate_dir.exists():
+            return None
+        
+        print("Searching for intermediate point clouds...")
+        
+        # Find all step directories
+        step_dirs = []
+        for item in intermediate_dir.iterdir():
+            if item.is_dir() and item.name.startswith("step_"):
+                try:
+                    step_num = int(item.name.replace("step_", ""))
+                    pointcloud_file = item / "pointcloud.ply"
+                    if pointcloud_file.exists():
+                        step_dirs.append((step_num, pointcloud_file))
+                except ValueError:
+                    continue
+        
+        if not step_dirs:
+            print("No intermediate point clouds found")
+            return None
+        
+        # Sort by step number
+        step_dirs.sort(key=lambda x: x[0])
+        
+        print(f"Found {len(step_dirs)} intermediate point clouds")
+        
+        # Load all point clouds
+        point_clouds = {}
+        steps = []
+        
+        for step_num, pointcloud_file in step_dirs:
+            try:
+                # Try to use open3d if available, otherwise basic PLY parsing
+                try:
+                    import open3d as o3d
+                    pcd = o3d.io.read_point_cloud(str(pointcloud_file))
+                    point_cloud_data = {
+                        'points': np.asarray(pcd.points),
+                        'colors': np.asarray(pcd.colors) if pcd.has_colors() else None
+                    }
+                except ImportError:
+                    point_cloud_data = self._parse_ply_file(pointcloud_file)
+                
+                point_clouds[step_num] = point_cloud_data
+                steps.append(step_num)
+                
+                print(f"  Step {step_num:06d}: {len(point_cloud_data['points'])} points")
+                
+            except Exception as e:
+                print(f"  Failed to load step {step_num:06d}: {e}")
+                continue
+        
+        if not point_clouds:
+            return None
+        
+        return {
+            'point_clouds': point_clouds,
+            'steps': sorted(steps),
+            'is_temporal': True
+        }
     
     def _parse_ply_file(self, ply_file: Path) -> Dict[str, np.ndarray]:
         """Basic PLY file parser for when Open3D is not available."""
@@ -333,11 +443,20 @@ class SLAMOutputVisualizer:
         print("Visualization complete!")
     
     def _visualize_point_cloud(self) -> None:
-        """Visualize the point cloud."""
-        points = self.data['point_cloud']['points']
-        colors = self.data['point_cloud']['colors']
+        """Visualize the point cloud(s)."""
+        point_cloud_data = self.data['point_cloud']
         
-        print(f"Visualizing point cloud with {len(points)} points...")
+        # Check if we have temporal point clouds
+        if point_cloud_data.get('is_temporal', False):
+            print("Temporal point clouds will be visualized during trajectory playback")
+            # Temporal point clouds will be handled in _log_temporal_poses
+            return
+        
+        # Handle static point cloud
+        points = point_cloud_data['points']
+        colors = point_cloud_data['colors']
+        
+        print(f"Visualizing static point cloud with {len(points)} points...")
         
         # Log basic point cloud
         if colors is not None and len(colors) > 0:
@@ -395,7 +514,20 @@ class SLAMOutputVisualizer:
         
         # Calculate floor center (use point cloud center if available)
         if 'point_cloud' in self.data:
-            floor_center = np.mean(self.data['point_cloud']['points'], axis=0)
+            point_cloud_data = self.data['point_cloud']
+            if point_cloud_data.get('is_temporal', False):
+                # For temporal point clouds, use the last step for floor center calculation
+                if point_cloud_data['steps']:
+                    last_step = max(point_cloud_data['steps'])
+                    if last_step in point_cloud_data['point_clouds']:
+                        floor_center = np.mean(point_cloud_data['point_clouds'][last_step]['points'], axis=0)
+                    else:
+                        floor_center = np.array([0.0, 0.0, 0.0])
+                else:
+                    floor_center = np.array([0.0, 0.0, 0.0])
+            else:
+                # Static point cloud
+                floor_center = np.mean(point_cloud_data['points'], axis=0)
         else:
             floor_center = np.array([0.0, 0.0, 0.0])
         
@@ -539,10 +671,23 @@ class SLAMOutputVisualizer:
                            timestamps: np.ndarray, closest_points_data: Optional[Dict]) -> None:
         """Log temporal camera poses and analysis data."""
         
+        # Prepare temporal point cloud data if available
+        temporal_point_clouds = None
+        step_to_trajectory_mapping = None
+        if 'point_cloud' in self.data and self.data['point_cloud'].get('is_temporal', False):
+            temporal_point_clouds = self.data['point_cloud']
+            step_to_trajectory_mapping = self._map_steps_to_trajectory(
+                temporal_point_clouds['steps'], len(positions)
+            )
+        
         for i, (timestamp, position, quaternion) in enumerate(zip(timestamps, positions, quaternions)):
             # Set timeline
             rr.set_time("timestamp", timestamp=timestamp)
             rr.set_time("frame", sequence=i)
+            
+            # Log temporal point cloud if available for this step
+            if temporal_point_clouds and step_to_trajectory_mapping:
+                self._log_temporal_point_cloud(i, temporal_point_clouds, step_to_trajectory_mapping)
             
             # Log camera pose
             qx, qy, qz, qw = quaternion
@@ -601,6 +746,306 @@ class SLAMOutputVisualizer:
             if self.config['show_view_cones']:
                 distance_for_cone = closest_points_data['distances'][i] if closest_points_data and i < len(closest_points_data['distances']) else 1.0
                 self._log_view_cone(position, quaternion, distance_for_cone)
+    
+    def _map_steps_to_trajectory(self, point_cloud_steps: List[int], num_trajectory_poses: int) -> Dict[int, int]:
+        """Map point cloud steps to trajectory pose indices."""
+        if not point_cloud_steps:
+            return {}
+        
+        # Create mapping from trajectory index to point cloud step
+        # Assume linear mapping between trajectory poses and point cloud steps
+        mapping = {}
+        
+        if len(point_cloud_steps) == num_trajectory_poses:
+            # Perfect 1:1 mapping
+            for i, step in enumerate(point_cloud_steps):
+                mapping[i] = step
+        else:
+            # Map trajectory poses to the closest available point cloud step
+            max_step = max(point_cloud_steps)
+            min_step = min(point_cloud_steps)
+            
+            for i in range(num_trajectory_poses):
+                # Linear interpolation to find the corresponding step
+                if num_trajectory_poses > 1:
+                    progress = i / (num_trajectory_poses - 1)
+                else:
+                    progress = 0.0
+                
+                target_step = int(min_step + progress * (max_step - min_step))
+                
+                # Find the closest available step
+                closest_step = min(point_cloud_steps, key=lambda x: abs(x - target_step))
+                mapping[i] = closest_step
+        
+        print(f"Mapped {num_trajectory_poses} trajectory poses to {len(set(mapping.values()))} unique point cloud steps")
+        return mapping
+    
+    def _log_temporal_point_cloud(self, trajectory_index: int, temporal_point_clouds: Dict[str, Any], 
+                                 step_mapping: Dict[int, int]) -> None:
+        """Log the point cloud for the current trajectory step."""
+        if trajectory_index not in step_mapping:
+            return
+        
+        step_num = step_mapping[trajectory_index]
+        if step_num not in temporal_point_clouds['point_clouds']:
+            return
+        
+        point_cloud_data = temporal_point_clouds['point_clouds'][step_num]
+        points = point_cloud_data['points']
+        colors = point_cloud_data['colors']
+        
+        # Apply spatial-aware subsampling to manage memory while preserving structure
+        # Check if this is the final step (highest step number gets 100% of points)
+        max_step = max(temporal_point_clouds['steps'])
+        is_final_step = (step_num == max_step)
+        points, colors = self._spatially_subsample_points(points, colors, is_final_step)
+        
+        # Log point cloud for this step
+        if colors is not None and len(colors) > 0:
+            # Convert colors from [0,1] to [0,255] if needed
+            if colors.max() <= 1.0:
+                colors = (colors * 255).astype(np.uint8)
+            rr.log("world/pointcloud", rr.Points3D(points, colors=colors))
+        else:
+            rr.log("world/pointcloud", rr.Points3D(points, colors=[128, 128, 128]))
+        
+        # Highlight floor points if floor data is available
+        if self.config['highlight_floor_points'] and 'floor' in self.data:
+            self._highlight_floor_points_temporal(points, colors)
+    
+    def _spatially_subsample_points(self, points: np.ndarray, colors: Optional[np.ndarray], is_final_step: bool = False) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Subsample point cloud while preserving spatial consistency and structure.
+        Uses percentage-based subsampling - final step shows 100% of points.
+        """
+        # Check if subsampling is disabled
+        if not self.config.get('enable_subsampling', True):
+            return points, colors
+        
+        # Final step shows all points (100%)
+        if is_final_step:
+            print(f"Final step: showing all {len(points)} points (100%)")
+            return points, colors
+        
+        # Get percentage to keep
+        subsample_percentage = self.config.get('subsample_percentage', 0.6)
+        target_points = int(len(points) * subsample_percentage)
+                
+        # If we already have fewer points than target, keep all
+        if len(points) <= target_points:
+            return points, colors
+        
+        print(f"Subsampling {len(points)} points to {target_points} ({subsample_percentage*100:.1f}%) while preserving spatial structure...")
+        
+        # Use direct percentage-based sampling for precise control
+        return self._percentage_based_subsampling(points, colors, subsample_percentage)
+    
+    def _percentage_based_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray], percentage: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Direct percentage-based subsampling using spatial grid for uniform distribution.
+        Guarantees exact percentage while maintaining spatial consistency.
+        """
+        target_points = int(len(points) * percentage)
+        
+        # If requesting more points than we have, return all
+        if target_points >= len(points):
+            return points, colors
+        
+        # Method 1: Try voxel-based with fallback to random if not precise enough
+        try:
+            import open3d as o3d
+            
+            # Try voxel-based first to see if we can get close
+            voxel_points, voxel_colors = self._voxel_based_subsampling(points, colors, target_points)
+            
+            # Check if voxel method got us close enough (within 5%)
+            actual_percentage = len(voxel_points) / len(points)
+            target_percentage = percentage
+            
+            if abs(actual_percentage - target_percentage) <= 0.05:  # Within 5%
+                print(f"  Voxel method achieved {actual_percentage*100:.1f}% (target: {target_percentage*100:.1f}%)")
+                return voxel_points, voxel_colors
+            else:
+                print(f"  Voxel method achieved {actual_percentage*100:.1f}% (target: {target_percentage*100:.1f}%), using random spatial sampling")
+                
+        except ImportError:
+            print("  Open3D not available, using random spatial sampling")
+        
+        # Method 2: Random spatial sampling for exact percentage
+        return self._random_spatial_subsampling(points, colors, target_points)
+    
+    def _random_spatial_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray], target_points: int) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Random spatial subsampling that maintains spatial distribution while achieving exact count.
+        """
+        # Use spatial stratification to maintain distribution
+        # Divide space into grid cells and sample proportionally from each
+        
+        # Calculate bounding box
+        min_coords = np.min(points, axis=0)
+        max_coords = np.max(points, axis=0)
+        
+        # Create a reasonable grid (aim for ~10-20 points per cell on average)
+        avg_points_per_cell = 15
+        total_cells = len(points) // avg_points_per_cell
+        cells_per_dim = max(2, int(total_cells ** (1/3)))
+        
+        # Calculate grid dimensions
+        grid_size = (max_coords - min_coords) / cells_per_dim
+        
+        # Assign points to grid cells
+        grid_indices = np.floor((points - min_coords) / grid_size).astype(np.int32)
+        grid_indices = np.clip(grid_indices, 0, cells_per_dim - 1)  # Ensure within bounds
+        
+        # Group points by grid cell
+        cell_points = {}
+        for i, cell_idx in enumerate(grid_indices):
+            key = tuple(cell_idx)
+            if key not in cell_points:
+                cell_points[key] = []
+            cell_points[key].append(i)
+        
+        # Calculate how many points to sample from each cell
+        sampling_ratio = target_points / len(points)
+        selected_indices = []
+        
+        for cell_indices in cell_points.values():
+            cell_target = max(1, int(len(cell_indices) * sampling_ratio))
+            if len(cell_indices) <= cell_target:
+                selected_indices.extend(cell_indices)
+            else:
+                # Randomly sample from this cell
+                sampled = np.random.choice(cell_indices, cell_target, replace=False)
+                selected_indices.extend(sampled)
+        
+        # If we have too many points, randomly remove some
+        if len(selected_indices) > target_points:
+            selected_indices = np.random.choice(selected_indices, target_points, replace=False)
+        
+        # If we have too few points, randomly add some more
+        elif len(selected_indices) < target_points:
+            remaining_indices = list(set(range(len(points))) - set(selected_indices))
+            if remaining_indices:
+                additional_needed = target_points - len(selected_indices)
+                additional_needed = min(additional_needed, len(remaining_indices))
+                additional = np.random.choice(remaining_indices, additional_needed, replace=False)
+                selected_indices.extend(additional)
+        
+        # Convert to numpy array and extract points
+        selected_indices = np.array(selected_indices)
+        filtered_points = points[selected_indices]
+        filtered_colors = colors[selected_indices] if colors is not None else None
+        
+        actual_percentage = len(filtered_points) / len(points)
+        print(f"  Random spatial sampling: {len(points)} -> {len(filtered_points)} points ({actual_percentage*100:.1f}%)")
+        
+        return filtered_points, filtered_colors
+    
+    def _voxel_based_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray], max_points: int) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """Use Open3D's voxel downsampling for optimal spatial distribution."""
+        import open3d as o3d
+        
+        # Create Open3D point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        
+        if colors is not None:
+            # Normalize colors to [0,1] range if needed
+            if colors.max() > 1.0:
+                colors_normalized = colors / 255.0
+            else:
+                colors_normalized = colors
+            pcd.colors = o3d.utility.Vector3dVector(colors_normalized)
+        
+        # Calculate an intelligent initial voxel size based on point cloud characteristics
+        # Get bounding box to understand the scale
+        min_coords = np.min(points, axis=0)
+        max_coords = np.max(points, axis=0)
+        bbox_diagonal = np.linalg.norm(max_coords - min_coords)
+        
+        # Estimate voxel size based on desired reduction ratio
+        # For N points wanting to keep M points, rough voxel count = M
+        # So voxel_size ≈ bbox_diagonal / (M^(1/3))
+        target_ratio = max_points / len(points)
+        estimated_voxels_per_dim = int((max_points) ** (1/3))
+        initial_voxel_size = bbox_diagonal / max(10, estimated_voxels_per_dim)
+        
+        # Ensure reasonable bounds (between 0.01m and 1.0m)
+        voxel_size = max(0.01, min(1.0, initial_voxel_size))
+        
+        print(f"  Initial voxel calculation: bbox={bbox_diagonal:.2f}m, target_ratio={target_ratio:.2f}, initial_voxel={voxel_size:.3f}")
+        
+        # Iteratively adjust voxel size to get close to target point count
+        for attempt in range(8):  # Increased attempts for better convergence
+            pcd_downsampled = pcd.voxel_down_sample(voxel_size)
+            downsampled_count = len(pcd_downsampled.points)
+            
+            if downsampled_count == 0:
+                # Voxel size too large, make it much smaller
+                voxel_size *= 0.1
+                continue
+                
+            # Check if we're close enough (within 20% of target)
+            if abs(downsampled_count - max_points) <= max_points * 0.2:
+                break
+            elif downsampled_count > max_points:
+                # Too many points, increase voxel size
+                adjustment = min(2.0, (downsampled_count / max_points) ** 0.5)
+                voxel_size *= adjustment
+            else:
+                # Too few points, decrease voxel size
+                adjustment = max(0.5, (downsampled_count / max_points) ** 0.5)
+                voxel_size *= adjustment
+                
+            # Prevent infinite loops with extreme values
+            voxel_size = max(0.001, min(10.0, voxel_size))
+        
+        # Extract results
+        filtered_points = np.asarray(pcd_downsampled.points)
+        filtered_colors = None
+        if colors is not None and pcd_downsampled.has_colors():
+            filtered_colors = np.asarray(pcd_downsampled.colors)
+            # Convert back to [0,255] if original was in that range
+            if colors.max() > 1.0:
+                filtered_colors = (filtered_colors * 255).astype(np.uint8)
+        
+        print(f"  Voxel filtering: {len(points)} -> {len(filtered_points)} points (voxel_size: {voxel_size:.3f})")
+        return filtered_points, filtered_colors
+    
+    def _highlight_floor_points_temporal(self, points: np.ndarray, colors: Optional[np.ndarray]) -> None:
+        """Highlight floor points in the temporal point cloud."""
+        if 'floor' not in self.data:
+            return
+            
+        floor_normal = self.data['floor']['normal']
+        floor_offset = self.data['floor']['offset']
+        floor_threshold = self.config['floor_threshold']
+        
+        # Calculate distance of each point to the floor plane
+        distances_to_floor = np.abs(np.dot(points, floor_normal) - floor_offset)
+        floor_mask = distances_to_floor < floor_threshold
+        
+        # Create modified colors highlighting floor points
+        if colors is not None:
+            modified_colors = colors.copy()
+        else:
+            modified_colors = np.full((len(points), 3), [128, 128, 128], dtype=np.uint8)
+        
+        # Color floor points in bright green
+        modified_colors[floor_mask] = [0, 255, 0]  # Bright green for floor
+        
+        # Log the point cloud with floor highlighting
+        rr.log("world/pointcloud_with_floor", rr.Points3D(points, colors=modified_colors))
+        
+        # Also log just the floor points separately
+        floor_points = points[floor_mask]
+        if len(floor_points) > 0:
+            rr.log("world/floor_points", rr.Points3D(
+                floor_points, 
+                colors=[0, 255, 0],  # Bright green
+                radii=[0.01]
+            ))
     
     def _log_view_cone(self, camera_position: np.ndarray, camera_quaternion: np.ndarray,
                       distance: float) -> None:
@@ -694,6 +1139,13 @@ Examples:
     python visualize_slam_output.py ./enhanced_slam_outputs/slam_analysis_20240115_143045
     python visualize_slam_output.py ./outputs --no-view-cones --no-floor
     python visualize_slam_output.py ./outputs --cone-angle 45 --grid-size 5.0
+    python visualize_slam_output.py ./outputs --subsample-percentage 0.8 --voxel-size 0.15
+    
+Note: 
+- View cone settings will be automatically configured from pipeline metadata if available.
+- Point cloud subsampling uses percentage-based reduction to maintain consistent density across steps.
+- The final temporal step always shows 100% of points, earlier steps show the specified percentage.
+- Use --no-subsampling to disable subsampling (may cause memory issues with large temporal datasets).
         """
     )
     
@@ -733,6 +1185,14 @@ Examples:
     parser.add_argument('--max-cone-length', type=float, default=2.0,
                        help='Maximum length for view cones (meters)')
     
+    # Point cloud subsampling parameters
+    parser.add_argument('--subsample-percentage', type=float, default=0.5,
+                       help='Percentage of points to keep for temporal steps (0.0-1.0), final step shows 100%%')
+    parser.add_argument('--voxel-size', type=float, default=0.1,
+                       help='Initial voxel size for spatial subsampling (meters)')
+    parser.add_argument('--no-subsampling', action='store_true',
+                       help='Disable point cloud subsampling (may cause memory issues with large datasets)')
+    
     return parser.parse_args()
 
 
@@ -754,12 +1214,20 @@ def main():
         'grid_size': args.grid_size,
         'view_cone_angle': args.cone_angle,
         'cone_length_factor': args.cone_length_factor,
-        'max_cone_length': args.max_cone_length
+        'max_cone_length': args.max_cone_length,
+        'subsample_percentage': args.subsample_percentage,
+        'voxel_size': args.voxel_size,
+        'enable_subsampling': not args.no_subsampling
     }
     
     try:
         # Create and run visualizer
         visualizer = SLAMOutputVisualizer(args.output_dir, config)
+        
+        # Track if user explicitly disabled view cones
+        if args.no_view_cones:
+            visualizer._user_disabled_view_cones = True
+        
         visualizer.load_data()
         visualizer.visualize()
         
