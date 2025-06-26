@@ -68,5 +68,16 @@
             ],
             "justMyCode": false
         },
+        {
+            "name": "Python Debugger: Visualize",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/visualize_slam_output.py",
+            "console": "integratedTerminal",
+            "args": [
+                "enhanced_slam_outputs/run_34/incremental_analysis_detailed_20250626_154147",
+            ],
+            "justMyCode": false
+        },
     ]
 }
