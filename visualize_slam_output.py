@@ -18,6 +18,7 @@ import rerun as rr
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 import re
+from plyfile import PlyData, PlyElement
 
 
 class SLAMOutputVisualizer:
@@ -140,13 +141,33 @@ class SLAMOutputVisualizer:
             try:
                 # Try to use open3d if available, otherwise basic PLY parsing
                 try:
-                    import open3d as o3d
-                    pcd = o3d.io.read_point_cloud(str(pc_file))
-                    self.data['point_cloud'] = {
-                        'points': np.asarray(pcd.points),
-                        'colors': np.asarray(pcd.colors) if pcd.has_colors() else None,
-                        'is_temporal': False  # Mark as static point cloud
+                    #import open3d as o3d
+                    #pcd = o3d.io.read_point_cloud(str(pc_file))
+                    #self.data['point_cloud'] = {
+                    #    'points': np.asarray(pcd.points),
+                    #    'colors': np.asarray(pcd.colors) if pcd.has_colors() else None,
+                    #    'is_temporal': False  # Mark as static point cloud
+                    #}
+                    plydata = PlyData.read(str(pc_file))
+                
+                    assert len(plydata.elements) == 1, "Expected exactly 1 element in the plydata. Don't know whats wrong."
+
+                    point_cloud_data = {
+                        "points": np.stack([
+                            np.asarray(plydata.elements[0]["x"]),
+                            np.asarray(plydata.elements[0]["y"]),
+                            np.asarray(plydata.elements[0]["z"])]
+                            ,1),
+                        "colors": np.stack([
+                            np.asarray(plydata.elements[0]["red"]),
+                            np.asarray(plydata.elements[0]["green"]),
+                            np.asarray(plydata.elements[0]["blue"])]
+                            ,1),
+                        "classIds": np.asarray(plydata.elements[0]["segmentation"]),
+                        "is_temporal": False
                     }
+                    self.data['point_cloud'] = point_cloud_data
+
                 except ImportError:
                     print("Open3D not available, using basic PLY parsing")
                     point_cloud_data = self._parse_ply_file(pc_file)
@@ -194,16 +215,36 @@ class SLAMOutputVisualizer:
         
         for step_num, pointcloud_file in step_dirs:
             try:
-                # Try to use open3d if available, otherwise basic PLY parsing
-                try:
-                    import open3d as o3d
-                    pcd = o3d.io.read_point_cloud(str(pointcloud_file))
-                    point_cloud_data = {
-                        'points': np.asarray(pcd.points),
-                        'colors': np.asarray(pcd.colors) if pcd.has_colors() else None
-                    }
-                except ImportError:
-                    point_cloud_data = self._parse_ply_file(pointcloud_file)
+                # Read the PLY file and extract points, colors, confidence, and segmentation if present
+                plydata = PlyData.read(str(pointcloud_file))
+                
+                assert len(plydata.elements) == 1, "Expected exactly 1 element in the plydata. Don't know whats wrong."
+
+                point_cloud_data = {
+                    "points": np.stack([
+                        np.asarray(plydata.elements[0]["x"]),
+                        np.asarray(plydata.elements[0]["y"]),
+                        np.asarray(plydata.elements[0]["z"])]
+                        ,1),
+                    "colors": np.stack([
+                        np.asarray(plydata.elements[0]["red"]),
+                        np.asarray(plydata.elements[0]["green"]),
+                        np.asarray(plydata.elements[0]["blue"])]
+                        ,1),
+                    "classIds": np.asarray(plydata.elements[0]["segmentation"])
+                }
+
+                
+                #try:
+                #    import open3d as o3d
+                #    pcd = o3d.io.read_point_cloud(str(pointcloud_file))
+                #    point_cloud_data = {
+                #        'points': np.asarray(pcd.points),
+                #        'colors': np.asarray(pcd.colors) if pcd.has_colors() else None
+#
+                #    }
+                #except ImportError:
+                #    point_cloud_data = self._parse_ply_file(pointcloud_file)
                 
                 point_clouds[step_num] = point_cloud_data
                 steps.append(step_num)
@@ -227,6 +268,8 @@ class SLAMOutputVisualizer:
         """Basic PLY file parser for when Open3D is not available."""
         points = []
         colors = []
+        classIds = []
+        has_classIds = False
         has_colors = False
         
         with open(ply_file, 'r') as f:
@@ -244,6 +287,8 @@ class SLAMOutputVisualizer:
                 properties.append(line.strip())
                 if 'red' in line or 'green' in line or 'blue' in line:
                     has_colors = True
+                if "segmentation" in line:
+                    has_classIds= True
             elif line.startswith('end_header'):
                 data_start = i + 1
                 break
@@ -259,9 +304,14 @@ class SLAMOutputVisualizer:
                 if has_colors and len(values) >= 6:
                     colors.append([int(values[3]), int(values[4]), int(values[5])])
         
+                # Extract class Ids if available
+                if has_classIds and len(values)>=7:
+                    classIds.append(int(values[6]))
+
         return {
             'points': np.array(points),
-            'colors': np.array(colors) if colors else None
+            'colors': np.array(colors) if colors else None,
+            "classIds": np.array(classIds) if classIds else None,
         }
     
     def _load_trajectory(self) -> None:
@@ -455,18 +505,55 @@ class SLAMOutputVisualizer:
         # Handle static point cloud
         points = point_cloud_data['points']
         colors = point_cloud_data['colors']
+        classIds = point_cloud_data["classIds"]
         
         print(f"Visualizing static point cloud with {len(points)} points...")
         
         # Log basic point cloud
-        if colors is not None and len(colors) > 0:
+        # Optionally color point cloud by classId
+        color_by_class = self.config.get("color_pointcloud_by_classIds", False)
+        has_colors = colors is not None and len(colors) > 0
+        has_classIds = classIds is not None and len(classIds) > 0
+
+        classIds = classIds.astype(int) if classIds is not None else None
+
+        if color_by_class and has_classIds:
+            rr.log(
+            "world/pointcloud",
+            rr.Points3D(points, class_ids=classIds),
+            static=True
+            )
+        elif has_colors:
             # Convert colors from [0,1] to [0,255] if needed
             if colors.max() <= 1.0:
                 colors = (colors * 255).astype(np.uint8)
-            rr.log("world/pointcloud", rr.Points3D(points, colors=colors), static=True)
+            if has_classIds:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=colors, class_ids=classIds),
+                    static=True
+                )
+            else:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=colors),
+                    static=True
+                )
         else:
-            rr.log("world/pointcloud", rr.Points3D(points, colors=[128, 128, 128]), static=True)
-        
+            default_color = [128, 128, 128]
+            if has_classIds:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=default_color, class_ids=classIds),
+                    static=True
+                )
+            else:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=default_color),
+                    static=True
+                )
+
         # Highlight floor points if floor data is available
         if self.config['highlight_floor_points'] and 'floor' in self.data:
             self._highlight_floor_points(points, colors)
@@ -793,40 +880,76 @@ class SLAMOutputVisualizer:
         
         point_cloud_data = temporal_point_clouds['point_clouds'][step_num]
         points = point_cloud_data['points']
-        colors = point_cloud_data['colors']
+        colors = point_cloud_data.get('colors')
+        classIds = point_cloud_data.get('classIds')
         
         # Apply spatial-aware subsampling to manage memory while preserving structure
         # Check if this is the final step (highest step number gets 100% of points)
         max_step = max(temporal_point_clouds['steps'])
         is_final_step = (step_num == max_step)
-        points, colors = self._spatially_subsample_points(points, colors, is_final_step)
+        points, colors, classIds = self._spatially_subsample_points(points, colors,classIds, is_final_step)
         
         # Log point cloud for this step
-        if colors is not None and len(colors) > 0:
+        color_by_class = self.config.get("color_pointcloud_by_classIds", False)
+        has_colors = colors is not None and len(colors) > 0
+        has_classIds = classIds is not None and len(classIds) > 0
+
+        classIds = classIds.astype(int) if classIds is not None else None
+
+        if color_by_class and has_classIds:
+            rr.log(
+            "world/pointcloud_colored_by_class",
+            rr.Points3D(points, class_ids=classIds),
+            static=True
+            )
+        elif has_colors:
             # Convert colors from [0,1] to [0,255] if needed
             if colors.max() <= 1.0:
                 colors = (colors * 255).astype(np.uint8)
-            rr.log("world/pointcloud", rr.Points3D(points, colors=colors))
+            if has_classIds:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=colors, class_ids=classIds),
+                    static=True
+                )
+            else:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=colors),
+                    static=True
+                )
         else:
-            rr.log("world/pointcloud", rr.Points3D(points, colors=[128, 128, 128]))
-        
+            default_color = [128, 128, 128]
+            if has_classIds:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=default_color, class_ids=classIds),
+                    static=True
+                )
+            else:
+                rr.log(
+                    "world/pointcloud",
+                    rr.Points3D(points, colors=default_color),
+                    static=True
+                )
+
         # Highlight floor points if floor data is available
         if self.config['highlight_floor_points'] and 'floor' in self.data:
             self._highlight_floor_points_temporal(points, colors)
     
-    def _spatially_subsample_points(self, points: np.ndarray, colors: Optional[np.ndarray], is_final_step: bool = False) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    def _spatially_subsample_points(self, points: np.ndarray, colors: Optional[np.ndarray],classIds:Optional[np.ndarray], is_final_step: bool = False) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Subsample point cloud while preserving spatial consistency and structure.
         Uses percentage-based subsampling - final step shows 100% of points.
         """
         # Check if subsampling is disabled
         if not self.config.get('enable_subsampling', True):
-            return points, colors
+            return points, colors, classIds
         
         # Final step shows all points (100%)
         if is_final_step:
             print(f"Final step: showing all {len(points)} points (100%)")
-            return points, colors
+            return points, colors, classIds
         
         # Get percentage to keep
         subsample_percentage = self.config.get('subsample_percentage', 0.6)
@@ -834,14 +957,14 @@ class SLAMOutputVisualizer:
                 
         # If we already have fewer points than target, keep all
         if len(points) <= target_points:
-            return points, colors
+            return points, colors, classIds
         
         print(f"Subsampling {len(points)} points to {target_points} ({subsample_percentage*100:.1f}%) while preserving spatial structure...")
         
         # Use direct percentage-based sampling for precise control
-        return self._percentage_based_subsampling(points, colors, subsample_percentage)
+        return self._percentage_based_subsampling(points, colors,classIds, subsample_percentage)
     
-    def _percentage_based_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray], percentage: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    def _percentage_based_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray],classIds:Optional[np.ndarray], percentage: float) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Direct percentage-based subsampling using spatial grid for uniform distribution.
         Guarantees exact percentage while maintaining spatial consistency.
@@ -850,14 +973,14 @@ class SLAMOutputVisualizer:
         
         # If requesting more points than we have, return all
         if target_points >= len(points):
-            return points, colors
+            return points, colors, classIds
         
         # Method 1: Try voxel-based with fallback to random if not precise enough
         try:
             import open3d as o3d
             
             # Try voxel-based first to see if we can get close
-            voxel_points, voxel_colors = self._voxel_based_subsampling(points, colors, target_points)
+            voxel_points, voxel_colors,voxel_classIds = self._voxel_based_subsampling(points, colors,classIds, target_points)
             
             # Check if voxel method got us close enough (within 5%)
             actual_percentage = len(voxel_points) / len(points)
@@ -865,7 +988,7 @@ class SLAMOutputVisualizer:
             
             if abs(actual_percentage - target_percentage) <= 0.05:  # Within 5%
                 print(f"  Voxel method achieved {actual_percentage*100:.1f}% (target: {target_percentage*100:.1f}%)")
-                return voxel_points, voxel_colors
+                return voxel_points, voxel_colors, voxel_classIds
             else:
                 print(f"  Voxel method achieved {actual_percentage*100:.1f}% (target: {target_percentage*100:.1f}%), using random spatial sampling")
                 
@@ -873,9 +996,9 @@ class SLAMOutputVisualizer:
             print("  Open3D not available, using random spatial sampling")
         
         # Method 2: Random spatial sampling for exact percentage
-        return self._random_spatial_subsampling(points, colors, target_points)
+        return self._random_spatial_subsampling(points, colors,classIds, target_points)
     
-    def _random_spatial_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray], target_points: int) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    def _random_spatial_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray],classIds: Optional[np.ndarray], target_points: int) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         Random spatial subsampling that maintains spatial distribution while achieving exact count.
         """
@@ -936,13 +1059,14 @@ class SLAMOutputVisualizer:
         selected_indices = np.array(selected_indices)
         filtered_points = points[selected_indices]
         filtered_colors = colors[selected_indices] if colors is not None else None
+        filtered_classIds = classIds[selected_indices] if classIds is not None else None
         
         actual_percentage = len(filtered_points) / len(points)
         print(f"  Random spatial sampling: {len(points)} -> {len(filtered_points)} points ({actual_percentage*100:.1f}%)")
         
-        return filtered_points, filtered_colors
+        return filtered_points, filtered_colors, filtered_classIds
     
-    def _voxel_based_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray], max_points: int) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    def _voxel_based_subsampling(self, points: np.ndarray, colors: Optional[np.ndarray],classIds: Optional[np.ndarray], max_points: int) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """Use Open3D's voxel downsampling for optimal spatial distribution."""
         import open3d as o3d
         
@@ -957,6 +1081,11 @@ class SLAMOutputVisualizer:
             else:
                 colors_normalized = colors
             pcd.colors = o3d.utility.Vector3dVector(colors_normalized)
+
+        if classIds is not None:
+            pcd.normals = o3d.utility.Vector3dVector(
+                np.tile(classIds.reshape(-1, 1), (1, 3))
+            )
         
         # Calculate an intelligent initial voxel size based on point cloud characteristics
         # Get bounding box to understand the scale
@@ -1004,14 +1133,19 @@ class SLAMOutputVisualizer:
         # Extract results
         filtered_points = np.asarray(pcd_downsampled.points)
         filtered_colors = None
+        filtered_classIds = None
         if colors is not None and pcd_downsampled.has_colors():
             filtered_colors = np.asarray(pcd_downsampled.colors)
             # Convert back to [0,255] if original was in that range
             if colors.max() > 1.0:
                 filtered_colors = (filtered_colors * 255).astype(np.uint8)
+
+        if classIds is not None and pcd_downsampled.has_normals():
+            filtered_classIds = np.asarray(pcd_downsampled.normals)
+            filtered_classIds = filtered_classIds[:,0]
         
         print(f"  Voxel filtering: {len(points)} -> {len(filtered_points)} points (voxel_size: {voxel_size:.3f})")
-        return filtered_points, filtered_colors
+        return filtered_points, filtered_colors, filtered_classIds
     
     def _highlight_floor_points_temporal(self, points: np.ndarray, colors: Optional[np.ndarray]) -> None:
         """Highlight floor points in the temporal point cloud."""
@@ -1172,6 +1306,9 @@ Note:
                        help='Disable distance lines to closest points')
     parser.add_argument('--no-highlight-floor', action='store_true',
                        help='Disable floor point highlighting')
+    parser.add_argument("--color_pointcloud_by_classIds", action="store_true",
+                        help ="Enables colouring by classIds")
+
     
     # Visualization parameters
     parser.add_argument('--floor-threshold', type=float, default=0.05,
@@ -1217,7 +1354,8 @@ def main():
         'max_cone_length': args.max_cone_length,
         'subsample_percentage': args.subsample_percentage,
         'voxel_size': args.voxel_size,
-        'enable_subsampling': not args.no_subsampling
+        'enable_subsampling': not args.no_subsampling,
+        "color_pointcloud_by_classIds": args.color_pointcloud_by_classIds
     }
     
     try:

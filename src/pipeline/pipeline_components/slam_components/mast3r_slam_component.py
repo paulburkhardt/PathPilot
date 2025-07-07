@@ -12,12 +12,19 @@ import torch.multiprocessing as mp
 import torch
 import lietorch
 import numpy as np
+import PIL
 
-from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
+from .mast3r_slam_component_utils.shared_keyframes import SharedKeyframes
+from .mast3r_slam_component_utils.frame import create_frame
+
+
+#from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
+from mast3r_slam.frame import Mode, SharedStates
 from mast3r_slam.mast3r_utils import (
     load_mast3r,
     load_retriever,
     mast3r_inference_mono,
+    resize_img
 )
 from mast3r_slam.tracker import FrameTracker
 from mast3r_slam.global_opt import FactorGraph
@@ -29,6 +36,86 @@ from src.pipeline.data_entities.image_data_entity import ImageDataEntity
 from src.pipeline.data_entities.point_cloud_data_entity import PointCloudDataEntity
 
 
+#class Segmented_frame(Frame):
+#    def __init__(self, *args, **kwargs):
+#        super().__init__(*args, **kwargs)
+#        self.image_segmentation_mask = None
+#
+#
+#def _resize_pil_seg_mask(img, long_edge_size):
+#    S = max(img.size)
+#    interp = PIL.Image.NEAREST
+#    new_size = tuple(int(round(x * long_edge_size / S)) for x in img.size)
+#    return img.resize(new_size, interp)
+#
+#
+#def resize_seg_mask(img, size, square_ok=False, return_transformation=False):
+#    assert size == 224 or size == 512
+#    # numpy to PIL format
+#    img = PIL.Image.fromarray(np.uint8(img))
+#    W1, H1 = img.size
+#    if size == 224:
+#        # resize short side to 224 (then crop)
+#        img = _resize_pil_seg_mask(img, round(size * max(W1 / H1, H1 / W1)))
+#    else:
+#        # resize long side to 512
+#        img = _resize_pil_seg_mask(img, size)
+#    W, H = img.size
+#    cx, cy = W // 2, H // 2
+#    if size == 224:
+#        half = min(cx, cy)
+#        img = img.crop((cx - half, cy - half, cx + half, cy + half))
+#    else:
+#        halfw, halfh = ((2 * cx) // 16) * 8, ((2 * cy) // 16) * 8
+#        if not (square_ok) and W == H:
+#            halfh = 3 * halfw / 4
+#        img = img.crop((cx - halfw, cy - halfh, cx + halfw, cy + halfh))
+#
+#    unnormalized_img=np.asarray(img),
+#
+#    return unnormalized_img
+#
+#
+#def create_frame_with_segmentation_mask(i, img, T_WC, img_size=512, device="cuda:0", image_segmentation_mask=None):
+#    """
+#    Overwrites the create_frame method of masterslam to add in the segmentation mask
+#
+#    Args:
+#        
+#    Returns:
+#
+#    """
+#
+#    #----- untouched code from masterslam----------
+#    img = resize_img(img, img_size)
+#    rgb = img["img"].to(device=device)
+#    img_shape = torch.tensor(img["true_shape"], device=device)
+#    img_true_shape = img_shape.clone()
+#    uimg = torch.from_numpy(img["unnormalized_img"]) / 255.0
+#    downsample = config["dataset"]["img_downsample"]
+#    if downsample > 1:
+#        uimg = uimg[::downsample, ::downsample]
+#        img_shape = img_shape // downsample
+#    #frame = Frame(i, rgb, img_shape, img_true_shape, uimg, T_WC)
+#    #-----------------------------------------------
+#    frame = Segmented_frame(i, rgb, img_shape, img_true_shape, uimg, T_WC)
+#
+#    if image_segmentation_mask is not None:
+#        
+#        #repeat the image segmentation mask along the third dimension for compatibility with masterslam
+#        image_segmentation_mask = image_segmentation_mask.as_pytorch()
+#        H,W = image_segmentation_mask.shape
+#        image_segmentation_mask = image_segmentation_mask.unsqueeze(-1).expand(H,W,3)
+#        image_segmentation_mask = resize_seg_mask(image_segmentation_mask,img_size)[0]
+#        image_segmentation_mask = torch.from_numpy(image_segmentation_mask)
+#        image_segmentation_mask = image_segmentation_mask[:,:,0]
+#        if downsample >1:
+#            image_segmentation_mask = image_segmentation_mask[::downsample,::downsample]
+#
+#        #collapse the last dim again as they are unnecessary
+#        frame.image_segmentation_mask = image_segmentation_mask
+#
+#    return frame
 
 
 def relocalization(frame, keyframes, factor_graph, retrieval_database):
@@ -187,6 +274,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         c_confidence_threshold: float,
         mast3r_slam_config_path: str, 
         device: str = "cuda:0", 
+        segment_point_cloud: bool = True
         )->None:
 
         super().__init__()
@@ -194,6 +282,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         load_config(mast3r_slam_config_path)
         self.device = device
         self.c_confidence_threshold = c_confidence_threshold
+        self.segment_point_cloud = segment_point_cloud
 
         assert point_cloud_method in ["accumulating", "refreshing"], "point_cloud_method must be either 'accumulating' or 'refreshing'"
         self.point_cloud_method = point_cloud_method
@@ -211,7 +300,13 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
     @property
     def inputs_from_bucket(self) -> List[str]:
         """This component requires RGB images as input."""
-        return ["image","step_nr","timestamp","image_size","image_width","image_height", "calibration_K"]
+    
+        inputs = ["image","step_nr","timestamp","image_size","image_width","image_height", "calibration_K"]
+
+        if self.segment_point_cloud:
+            inputs.append("image_segmentation_mask")
+
+        return inputs
     
     @property
     def outputs_to_bucket(self) -> List[str]:
@@ -266,7 +361,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
              image_size:int,
              image_width: int,
              image_height: int,
-             calibration_K: Any=None) -> Dict[str, Any]:
+             calibration_K: Any=None,
+             image_segmentation_mask: Any=None) -> Dict[str, Any]:
         """
         Process an RGB image using MAST3R SLAM.
 
@@ -278,11 +374,15 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             image_width: Width of the image.
             image_height: Height of the image.
             calibration_K: Camera Calibration matrix
+            image_segmentation_mask: Segmentation of the input image
 
         Returns:
             Dict[str, Any]: A dictionary containing the point cloud ("point_cloud") and camera pose ("camera_pose").
         """
         
+
+        if self.segment_point_cloud:
+            assert image_segmentation_mask is not None, "segment_point_cloud is set to True, but no segmentation mask provided."
 
         if not self._is_inited:
             self._init_mast3r_slam(img_height=image_height,img_width=image_width,calibration_K=calibration_K)
@@ -295,7 +395,16 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             if step_nr == 0
             else self.states.get_frame().T_WC
         )
-        frame = create_frame(step_nr, image.as_numpy(), T_WC, img_size=image_size, device=self.device)
+
+        #frame = create_frame(step_nr, image.as_numpy(), T_WC, img_size=image_size, device=self.device)
+        frame = create_frame(
+            step_nr, 
+            image.as_numpy(), 
+            T_WC, 
+            img_size=image_size, 
+            device=self.device,
+            img_segmentation_mask= image_segmentation_mask
+        )
 
 
 
@@ -353,6 +462,10 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         pointclouds = []
         colors = []
         confidence_scores = []
+        if self.segment_point_cloud:
+            segmentation_masks = []
+        else:
+            segmentation_masks = None
 
         # variant 1: update the pointcloud merely with every keyframe
         if self.point_cloud_method == "accumulating":
@@ -366,6 +479,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                 pW = keyframe.T_WC.act(keyframe.X_canon).cpu().numpy().reshape(-1, 3)
                 color = (keyframe.uimg.cpu().numpy() * 255).astype(np.uint8).reshape(-1, 3)
                 score = keyframe.get_average_conf().cpu().numpy().astype(np.float32).reshape(-1)
+
                 valid = (
                     keyframe.get_average_conf().cpu().numpy().astype(np.float32).reshape(-1)
                     > self.c_confidence_threshold
@@ -373,13 +487,22 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                 pointclouds.append(pW[valid])
                 colors.append(color[valid])
                 confidence_scores.append(score[valid])
+
+                if self.segment_point_cloud:
+                    seg_mask = keyframe.img_segmentation_mask.cpu().numpy().astype(np.uint8).reshape(-1)
+                    segmentation_masks.append(seg_mask[valid])
+
             pointclouds = np.concatenate(pointclouds, axis=0)
             colors = np.concatenate(colors, axis=0)
             confidence_scores = np.concatenate(confidence_scores, axis=0)
-
+            if self.segment_point_cloud:
+                segmentation_masks = np.concatenate(segmentation_masks,axis=0)
 
         #update the pointcloud with every frame, but only have parts of the color
         elif self.point_cloud_method == "refreshing":
+
+            if self.segment_point_cloud:
+                raise NotImplementedError("segmentation currently only available for accumulating mode.")
 
             if config["use_calib"] and calibration_K is not None:
                 X_canon = constrain_points_to_ray(
@@ -408,7 +531,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         point_cloud_data_entity = PointCloudDataEntity(
             point_cloud=pointclouds, #pointcloud in world coordinates
             rgb= colors,
-            confidence_scores=confidence_scores
+            confidence_scores=confidence_scores,
+            segmentation_mask = segmentation_masks
         )
 
         return {

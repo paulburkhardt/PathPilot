@@ -56,5 +56,29 @@
             ],
             "justMyCode": false
         },
+        {
+            "name": "Python Debugger: Main (stage 2)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--config-name",
+                "phase_2_incremental_slam_analysis_with_intermediate"
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: Visualize (Color by class id)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/visualize_slam_output.py",
+            "console": "integratedTerminal",
+            "args": [
+                "enhanced_slam_outputs/run_34/incremental_analysis_detailed_20250626_154147",
+                "--color_pointcloud_by_classIds"
+            ],
+            "justMyCode": false
+        },
     ]
 }
