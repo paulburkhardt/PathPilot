@@ -8,7 +8,12 @@ pipeline:
     
     # Run the Image segmenter
     - type: ImageDataSegmenter
-      config: {}
+      config:
+        model_cfg_path: "sam2.1/sam2.1_hiera_t.yaml"
+        checkpoint_path: "segment_anything_2/checkpoints/sam2.1_hiera_tiny.pt"
+        automask_interval: 30
+        number_of_objects: 10
+        min_mask_region_area : 500
 
 
     # Run MAST3R SLAM to generate point cloud and trajectory incrementally
