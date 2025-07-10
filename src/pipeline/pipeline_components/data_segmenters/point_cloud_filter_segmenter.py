@@ -47,9 +47,9 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         Raises:
             NotImplementedError: As this is currently a placeholder
         """
-        if key_frame_flag:
-            return {"object_point_cloud": None, 
-                    "point_cloud": point_cloud}
+        # if key_frame_flag:
+        #     return {"object_point_cloud": None, 
+        #             "point_cloud": point_cloud}
         
         pointcloud = point_cloud.as_numpy(with_rgb = True, 
                                           with_confidence_score = True ,
@@ -67,7 +67,7 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
             points = arr[:, :-1]
             # Remove all-zero points
             if len(points) > 0:
-                db = DBSCAN(eps= self.neighbor_distance, min_samples=5).fit(points)
+                db = DBSCAN(eps= self.neighbor_distance, min_samples=5).fit(points[:,:3])
                 labels = db.labels_
                 unique_labels, label_counts = np.unique(labels[labels != -1], return_counts=True)
                 valid_labels = unique_labels[label_counts >= self.min_cluster_size]

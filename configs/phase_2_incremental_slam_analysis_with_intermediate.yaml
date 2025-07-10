@@ -27,8 +27,8 @@ pipeline:
     - type: PointCloudFilterSegmenter
       config:
         downsample_rate : 1
-        min_cluster_size: 5
-        neighbor_distance:  0.25
+        min_cluster_size: 1000
+        neighbor_distance:  0.05
 
     
     # Incremental floor detection - waits for 3 frames, refines frequently for better accuracy
