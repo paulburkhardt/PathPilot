@@ -311,7 +311,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
     @property
     def outputs_to_bucket(self) -> List[str]:
         """This component outputs point clouds and camera poses."""
-        return ["point_cloud", "camera_pose"]
+        return ["point_cloud", "camera_pose", "key_frame_flag"]
 
     def _init_mast3r_slam(
             self,
@@ -499,7 +499,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                 segmentation_masks = np.concatenate(segmentation_masks,axis=0)
 
         #update the pointcloud with every frame, but only have parts of the color
-        elif self.point_cloud_method == "refreshing":
+        elif self.point_cloud_method == "refreshing" and add_new_kf:
 
             if self.segment_point_cloud:
                 raise NotImplementedError("segmentation currently only available for accumulating mode.")
@@ -537,5 +537,6 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
 
         return {
             "point_cloud": point_cloud_data_entity,
-            "camera_pose": T_WC
+            "camera_pose": T_WC,
+            "key_frame_flag": add_new_kf
         }

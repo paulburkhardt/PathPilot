@@ -26,6 +26,7 @@ class PipelineDataBucket:
         "camera_pose",
         "timestamp",
         "calibration_K",
+        "key_frame_flag",
 
         "floor_normal", 
         "floor_offset", 
@@ -39,7 +40,12 @@ class PipelineDataBucket:
 
         "image_segmentation_mask",
         "point_cloud_segmentation_mask",
-        "floor_filtered_mask"
+        "floor_filtered_mask",
+
+        "object_point_cloud",
+        "objects",
+        "objects_dict"
+        
     ]
     
     def __init__(self) -> None:

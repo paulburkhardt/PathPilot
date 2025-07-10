@@ -122,6 +122,7 @@ class PointCloudDataEntity(AbstractDataEntity):
                 raise TypeError("There is no segmentation mask in this pointcloud.")
 
         if len(components) > 1:
+            components = [c.reshape(-1, 1) if c.ndim == 1 else c for c in components]
             return np.concatenate(components, axis=-1)
         else:
             return self.point_cloud_numpy

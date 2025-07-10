@@ -7,6 +7,9 @@ from .pipeline_components.data_writers.enhanced_slam_output_writer import Enhanc
 from .pipeline_components.data_segmenters.incremental_floor_detection_component import IncrementalFloorDetectionComponent
 from .pipeline_components.object_extractors.incremental_closest_point_finder_component import IncrementalClosestPointFinderComponent
 from .pipeline_components.data_segmenters.image_data_segmenter import ImageDataSegmenter
+from .pipeline_components.data_segmenters.point_cloud_filter_segmenter import PointCloudFilterSegmenter
+from .pipeline_components.object_databases.bbox_object_database import BBoxObjectDatabase
+
 
 class PipelineBuilder:
     """
@@ -29,7 +32,10 @@ class PipelineBuilder:
         "EnhancedSLAMOutputWriter": EnhancedSLAMOutputWriter,
         "IncrementalClosestPointFinderComponent": IncrementalClosestPointFinderComponent,
         "IncrementalFloorDetectionComponent": IncrementalFloorDetectionComponent,
-        "ImageDataSegmenter": ImageDataSegmenter
+        "ImageDataSegmenter": ImageDataSegmenter,
+        "PointCloudFilterSegmenter": PointCloudFilterSegmenter,
+        "BBoxObjectDatabase": BBoxObjectDatabase
+
         
         # Add other components here as they are implemented
     }
