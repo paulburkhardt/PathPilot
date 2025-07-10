@@ -92,9 +92,9 @@ class ImageDataSegmenter(AbstractDataSegmenter):
             rgb_image = np.clip(rgb_image, 0, 255).astype(np.uint8)
         if step_nr - self.last_automask_frame >= self.automask_interval:
             # Generate new masks
-            auto_masks = self._generate_auto_masks(rgb_image)
+            auto_masks, processed_bboxes = self._generate_auto_masks(rgb_image)
             if auto_masks:
-                self._initialize_tracking(rgb_image, auto_masks)
+                self._initialize_tracking(rgb_image, auto_masks, processed_bboxes)
                 self.last_automask_frame = step_nr
 
         self.masks = self._propagate_masks(rgb_image)
@@ -107,11 +107,13 @@ class ImageDataSegmenter(AbstractDataSegmenter):
         masks = self.mask_generator.generate(frame)
         
         processed_masks = []
+        processed_bboxes = []
         for mask_data in masks[:self.number_of_objects]:  # Limit to top 10 masks
             if mask_data["area"]> self.min_mask_region_area:
                 processed_masks.append(mask_data['segmentation'])
+                processed_bboxes.append(mask_data['bbox'])
         
-        return processed_masks
+        return processed_masks, processed_bboxes
     
 
     def batch_iou(self, new_masks, old_masks):
@@ -147,7 +149,7 @@ class ImageDataSegmenter(AbstractDataSegmenter):
         self.masks = matches  # replace old with current matched masks
         return matches
 
-    def _initialize_tracking(self, frame, masks):
+    def _initialize_tracking(self, frame, masks,bboxes):
         """Initialize tracking with generated masks"""
         # Reset inference state
         if not self.if_first_frame:
@@ -161,11 +163,21 @@ class ImageDataSegmenter(AbstractDataSegmenter):
             self.predictor.condition_state["tracking_has_started"] = False
             frame_idx = self.predictor.condition_state["num_frames"] -1
             
-        for obj_id, mask in self.match_new_masks(masks).items():
-            self.predictor.add_new_mask(
-                frame_idx=frame_idx,
-                obj_id=obj_id,
-                mask=mask
+        # for obj_id, mask in self.match_new_masks(masks).items():
+        #     self.predictor.add_new_mask(
+        #         frame_idx=frame_idx,
+        #         obj_id=obj_id,
+        #         mask=mask
+        #     )
+        for bbox in bboxes:
+            print(bbox.type)
+            self.predictor.add_new_prompt(
+                frame_idx,
+                str(uuid.uuid4()),
+                points=None,
+                bbox=bbox,
+                clear_old_points=True,
+                normalize_coords=True,
             )
     
 

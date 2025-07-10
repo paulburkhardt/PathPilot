@@ -68,3 +68,23 @@ class MaskDataWriter(AbstractDataWriter):
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
         return vis
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
