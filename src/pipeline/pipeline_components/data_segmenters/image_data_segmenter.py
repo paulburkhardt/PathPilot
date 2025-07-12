@@ -108,6 +108,7 @@ class ImageDataSegmenter(AbstractDataSegmenter):
         self.masks = self._propagate_masks(rgb_image)
         
         #transfer the multiple segmentation masks into a single one
+        self.mask_dic= {}
         segmentation_mask = np.zeros(rgb_image.shape[0:2],dtype=np.int32)
         for seg_id, seg_mask in self.masks.items():
             if seg_id in self.id_to_int.keys():
@@ -118,11 +119,10 @@ class ImageDataSegmenter(AbstractDataSegmenter):
                 self.id_to_int[seg_id] = seg_int
             
             segmentation_mask[seg_mask] = seg_int
+            self.mask_dic[seg_int] = seg_mask
         
         #convert to segmentation mask data entity
-        segmentation_mask = ImageSegmentationMaskDataEntity(
-            segmentation_mask
-        )
+        segmentation_mask = ImageSegmentationMaskDataEntity(segmentation_mask, self.mask_dic)
 
         return {"image_segmentation_mask": segmentation_mask}
     

@@ -15,6 +15,7 @@ class ImageSegmentationMaskDataEntity(AbstractDataEntity):
     def __init__(
         self,
         mask: np.ndarray | torch.Tensor,
+        mask_dic =  None 
     ) -> None:
         """
         Initializes the ImageSegmentationMaskDataEntity.
@@ -40,9 +41,14 @@ class ImageSegmentationMaskDataEntity(AbstractDataEntity):
             raise AssertionError(
                 f"mask must have shape (H, W), got {self.mask_pytorch.shape}"
             )
+        
+        self.mask_dic= mask_dic
 
     def as_numpy(self):
         return self.mask_numpy
 
     def as_pytorch(self):
         return self.mask_pytorch
+    
+    def as_binary_dict(self):
+        return self.mask_dic
