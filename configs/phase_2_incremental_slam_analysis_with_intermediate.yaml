@@ -30,6 +30,22 @@ pipeline:
         min_cluster_size: 1000
         neighbor_distance:  0.05
 
+    - type: ImageEmbeddingSegmenter
+      config:
+        text: "A picture of"
+
+
+    - type: BBoxObjectDatabase
+      config: 
+        match_threshold : 0.1 
+        embedding_weight : 0.7
+        running_embedding_weight  :  0.8 
+        knn_count  :  4
+        use_blip  :  False 
+        use_fusion  :  False
+
+
+
     
     # Incremental floor detection - waits for 3 frames, refines frequently for better accuracy
     - type: IncrementalFloorDetectionComponent

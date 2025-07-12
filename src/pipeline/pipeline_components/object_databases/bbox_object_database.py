@@ -2,10 +2,11 @@ from typing import List, Dict, Any
 from .abstract_object_database import AbstractObjectDatabase
 
 import numpy as np
+import torch
 from rtree import index
 import lietorch
 from bidict import bidict
-
+import torch.nn.functional as F
 
 class Object3D:
     def __init__(self, 
@@ -27,11 +28,13 @@ class Object3D:
         self.cum_len = points.shape[0]
 
         #self.points = points
-        self.embeddings = np.expand_dims(embedding, axis=0)
-        self.running_embedding = np.expand_dims(embedding, axis=0)
-        self.running_embedding /= np.linalg.norm(self.running_embedding)
-
-        self.running_embedding_weight = 0.8
+        if embedding is not None: 
+            self.embeddings = embedding
+            self.running_embedding = F.normalize(embedding, p=2, dim=-1)
+            # self.running_embedding /= np.linalg.norm(self.running_embedding) # ia already normed
+            self.running_embedding_weight = running_embedding_weight
+        else: 
+            self.embeddings = None
 
 
     def update(self,mask_id,new_points, new_embedding):
@@ -42,9 +45,11 @@ class Object3D:
 
         self.centroid = self.cum_sum / self.cum_len
         self.aabb = self.update_aabb(self.aabb,self.get_aabb(new_points))
-        self.running_embedding =  self.running_embedding_weight * self.running_embedding + (1 - self.running_embedding_weight) * new_embedding
-        self.running_embedding /= np.linalg.norm(self.running_embedding)
-        self.embeddings = np.vstack([self.embeddings,new_embedding])
+
+        if self.embeddings is not None: 
+            self.running_embedding =  self.running_embedding_weight * self.running_embedding + (1 - self.running_embedding_weight) * new_embedding
+            self.running_embedding = F.normalize(self.running_embedding, p=2, dim=-1) 
+            self.embeddings = torch.vstack([self.embeddings,new_embedding])
 
     def fuse(self, obj):
         self.mask_id.update(obj.mask_id)
@@ -54,9 +59,11 @@ class Object3D:
 
         self.centroid = self.cum_sum / self.cum_len
         self.aabb = self.update_aabb(self.aabb, obj.aabb) 
-        self.running_embedding = self.running_embedding * self.embeddings.shape[0] + obj.embeddings.shape[0] * obj.running_embedding
-        self.running_embedding /= np.linalg.norm(self.running_embedding)
-        self.embeddings = np.vstack([self.embeddings,obj.embeddings])
+        
+        if self.embeddings is not None:
+            self.running_embedding = self.running_embedding * self.embeddings.shape[0] + obj.embeddings.shape[0] * obj.running_embedding
+            self.running_embedding = F.normalize(self.running_embedding, p=2, dim=-1) 
+            self.embeddings = torch.vstack([self.embeddings,obj.embeddings])
 
     def get_aabb(self, points):
         min_bound = np.min(points, axis=0)
@@ -95,7 +102,7 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
         p.dimension = 3
         # p.dat_extension = 'data'
         # p.idx_extension = 'index'
-        self.rtree = index.Index(properties=p)
+        self.rtree = index.Index(properties=p, interleaved = False)
 
         self.match_threshold = match_threshold
         self.embedding_weight = embedding_weight
@@ -112,14 +119,18 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
     @property
     def inputs_from_bucket(self) -> List[str]:
         """This component requires Gaussian object data as input."""
-        return ["object_point_cloud","camera_pose","embeddings"]
+        inputs= ["object_point_cloud","camera_pose"]
+
+        if self.use_blip:
+            inputs.append("embeddings", "descriptions")
+        return inputs 
     
     @property
     def outputs_to_bucket(self) -> List[str]:
         """This component outputs database information."""
         return ["objects","object_dict"]
     
-    def _run(self, object_point_cloud: Any, camera_pose, embeddings: Dict = None, **kwargs: Any) -> Dict[str, Any]:
+    def _run(self, object_point_cloud: Any, camera_pose, embeddings: Dict = None, descriptions: Dict = None, **kwargs: Any) -> Dict[str, Any]:
         """
         Store and manage Gaussian objects in the database.
         
@@ -131,35 +142,26 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
         """
 
 
-        self.add_frame(object_point_cloud, embeddings)
-        translation = lietorch.SE3(camera_pose).translation()
-        objects = self.objects_map[self.query_objects(translation, self.knn_count)] #TODO Change to an intersection before the camera
+        self.add_frame(object_point_cloud, embeddings, descriptions)
+        translation = tuple(camera_pose.translation().flatten().cpu().numpy())[:3]
+        object_ids = self.query_objects(translation, "KNN")
+        objects = [self.objects_map[obj_id] for obj_id in object_ids] #TODO Change to an intersection before the camera
         return {"objects": objects ,
                 "object_dict": self.objects_map} 
     
-    def prepare_pointcloud(self,point_cloud):
-        pointcloud = point_cloud.as_numpy(with_segmentation_mask = True)[::self.downsample_rate]
-        ids = pointcloud[:, 0]
-        sorted_pc = pointcloud[np.argsort(ids)]
-        unique_ids, counts = np.unique(ids, return_counts=True)
-        splits = np.cumsum(counts)[:-1]
-
-        object_pointclouds = {
-            int(obj_id): arr[:, 1:]
-            for obj_id, arr in zip(unique_ids, np.split(sorted_pc, splits))
-        }
-        return object_pointclouds
+    
 
 
-    def add_frame(self, segmented_pointclouds, embeddings: Dict = None):
+    def add_frame(self, segmented_pointclouds, embeddings: Dict = None, descriptions: Dict = None):
         if embeddings is None:
             embeddings = {}
+            descriptions = {}
         updated_objects = []
         for mask_key, segmented_pointcloud in segmented_pointclouds.items():
 
             embeddings_vector = embeddings.get(mask_key, None)
             if embeddings_vector is not None:
-                embeddings_vector /= np.linalg.norm(embeddings_vector)
+                embeddings_vector = F.normalize(embeddings_vector, p=2, dim=-1)
             if mask_key in self.id_map:
                 self._update_object(mask_key, self.id_map[mask_key],segmented_pointcloud, embeddings_vector)
                 continue
@@ -169,7 +171,7 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
             obj_id = self._match_object(centroid, aabb, embeddings_vector)
 
             if obj_id is None:
-                self._create_object(mask_key, segmented_pointcloud, centroid, embeddings_vector)
+                self._create_object(mask_key, segmented_pointcloud, centroid, embeddings_vector, descriptions.get(mask_key, None))
             else:
                 self._update_object(mask_key, obj_id,segmented_pointcloud, embeddings_vector)
                 updated_objects.append(obj_id)
@@ -196,16 +198,12 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
             # Create a bidirectional mapping between object_ids and their indices
             oid_idx_map = bidict({oid: idx for idx, oid in enumerate(object_ids)})
             centroids = np.stack([self.objects_map[oid].centroid for oid in object_ids])
-            embeddings_matrix = np.stack([self.objects_map[oid].running_embedding for oid in object_ids])
             geo_dists = np.linalg.norm(centroids - centroid, axis=1)
             overlap_dists = np.array([self.overlap_3d(self.objects_map[oid].aabb, aabb) for oid in object_ids])
 
             if self.use_blip and embeddings_vector is not None:
-                if embeddings_vector.ndim == 2:
-                    embeddings_vector_mean = embeddings_vector.T
-                else:
-                    embeddings_vector_mean = embeddings_vector
-                emb_dists = 1 - (embeddings_matrix @ embeddings_vector_mean)
+                embeddings_matrix = torch.stack([self.objects_map[oid].running_embedding for oid in object_ids])
+                emb_dists = (1 - (embeddings_matrix @ embeddings_vector.T)).cpu().numpy()
             else:
                 emb_dists = np.ones(len(object_ids))
 
@@ -237,7 +235,7 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
            
 
 
-    def _create_object(self, mask_id, segmented_pointcloud, centroid, embeddings_vector = None):
+    def _create_object(self, mask_id, segmented_pointcloud, centroid, embeddings_vector = None, description = None):
         obj_id = self.obj_id_counter
         self.obj_id_counter += 1
 
@@ -247,6 +245,7 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
                         centroid= centroid,
                         points = segmented_pointcloud,
                         embedding = embeddings_vector,
+                        description= description,
                         running_embedding_weight = self.running_embedding_weight
                         )
         self.objects_map[obj_id] = obj
@@ -274,17 +273,20 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
     def region_pre_step(self, region):
         match len(region):
             case 3:
+
                 return (region[0],region[0],region[1],region[1],region[2],region[2])
             case 6:
                 return tuple(region)
             case _:
-                raise ValueError("Wrong dimensions")
+                print()
+                raise ValueError("Wrong dimensions",region.shape)
 
     def query_objects(self, region, mode = "KNN"):
 
         bbox = self.region_pre_step(region)
         match mode:
             case "KNN":
+                print(bbox)
                 return list(self.rtree.nearest(bbox, self.knn_count))
             case "intersection":
                 return list(self.rtree.intersection(bbox))
@@ -294,7 +296,24 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
     def _get_aabb(self, points):
         min_bound = np.min(points, axis=0)
         max_bound = np.max(points, axis=0)
-        return (min_bound[0], max_bound[0],min_bound[1], max_bound[1],min_bound[2], max_bound[2])
+        
+        # Validate that min <= max for all dimensions
+        if np.any(min_bound > max_bound):
+            print(f"Warning: min_bound > max_bound detected!")
+            print(f"min_bound: {min_bound}")
+            print(f"max_bound: {max_bound}")
+            print(f"points shape: {points.shape}")
+            print(f"points sample: {points[:5] if len(points) > 5 else points}")
+            raise ValueError("Invalid AABB: min_bound > max_bound")
+        
+        aabb = (min_bound[0], max_bound[0], min_bound[1], max_bound[1], min_bound[2], max_bound[2])
+        
+        # Additional validation for the final AABB
+        if aabb[0] > aabb[1] or aabb[2] > aabb[3] or aabb[4] > aabb[5]:
+            print(f"Warning: Invalid AABB coordinates: {aabb}")
+            raise ValueError("Invalid AABB coordinates")
+        
+        return aabb
 
 # def test_object_tracker3d_basic():
 #     # Create tracker

@@ -76,7 +76,7 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
 
 
                 if len(filtered_points) > 0:
-                    object_pointclouds[int(obj_id)] = filtered_points
+                    object_pointclouds[int(obj_id)] = filtered_points[:,:3]
 
                     # Re-attach the object id as last column for each point
                     obj_ids_col = np.full((filtered_points.shape[0], 1), obj_id)

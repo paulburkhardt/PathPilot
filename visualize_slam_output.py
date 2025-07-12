@@ -61,6 +61,9 @@ class SLAMOutputVisualizer:
         
         if self.config['show_closest_points']:
             self._load_closest_points()
+        
+        if self.config['show_object_mapping']:
+            self._load_object_mapping()
     
     def _load_metadata(self) -> None:
         """Load metadata.json if available."""
@@ -456,6 +459,104 @@ class SLAMOutputVisualizer:
         else:
             print("No closest points data file found")
     
+    def _load_object_mapping(self) -> None:
+        """Load object mapping data from JSON or CSV file."""
+        # Try to get path from metadata, otherwise use standard name
+        if 'file_paths' in self.data['metadata']:
+            obj_map_file = Path(self.data['metadata']['file_paths'].get('object_mapping_path', ''))
+            if not obj_map_file.is_absolute():
+                obj_map_file = self.output_dir / obj_map_file.name
+        else:
+            # Try multiple possible filenames
+            possible_names = [
+                "slam_analysis_object_mapping.json",
+                "slam_analysis_object_mapping.csv",
+                "slam_analysis_rerun_data.json",
+                "incremental_analysis_detailed_object_mapping.json",
+                "incremental_analysis_detailed_object_mapping.csv"
+            ]
+            obj_map_file = None
+            for name in possible_names:
+                candidate = self.output_dir / name
+                if candidate.exists():
+                    obj_map_file = candidate
+                    break
+            if obj_map_file is None:
+                print("No object mapping file found")
+                return
+        
+        if obj_map_file.exists():
+            try:
+                if obj_map_file.suffix == '.json':
+                    # Load JSON format
+                    with open(obj_map_file, 'r') as f:
+                        obj_map_data = json.load(f)
+                    
+                    # Handle different data formats
+                    if 'object_mapping' in obj_map_data:
+                        # Standard object mapping format
+                        self.data['object_mapping'] = obj_map_data['object_mapping']
+                        print(f"Loaded object mapping with {len(obj_map_data['object_mapping'])} objects from {obj_map_file}")
+                    elif 'objects' in obj_map_data:
+                        # Rerun-compatible format
+                        self.data['object_mapping'] = obj_map_data['objects']
+                        print(f"Loaded object mapping with {len(obj_map_data['objects'])} objects from {obj_map_file}")
+                    else:
+                        print(f"Unknown object mapping format in {obj_map_file}")
+                        
+                elif obj_map_file.suffix == '.csv':
+                    # Load CSV format
+                    import csv
+                    objects = {}
+                    
+                    with open(obj_map_file, 'r', newline='') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            obj_id = int(row['object_id'])
+                            
+                            # Parse mask IDs
+                            mask_ids_str = row.get('mask_ids', '')
+                            mask_ids = [int(x.strip()) for x in mask_ids_str.split(',') if x.strip()] if mask_ids_str else []
+                            
+                            # Parse centroid
+                            centroid = [
+                                float(row['centroid_x']),
+                                float(row['centroid_y']),
+                                float(row['centroid_z'])
+                            ]
+                            
+                            # Parse AABB
+                            aabb = [
+                                float(row['aabb_min_x']), float(row['aabb_max_x']),
+                                float(row['aabb_min_y']), float(row['aabb_max_y']),
+                                float(row['aabb_min_z']), float(row['aabb_max_z'])
+                            ]
+                            
+                            # Parse cum_sum
+                            cum_sum = [
+                                float(row['cum_sum_x']),
+                                float(row['cum_sum_y']),
+                                float(row['cum_sum_z'])
+                            ]
+                            
+                            objects[str(obj_id)] = {
+                                'id': obj_id,
+                                'mask_ids': mask_ids,
+                                'centroid': centroid,
+                                'aabb': aabb,
+                                'cum_sum': cum_sum,
+                                'cum_len': int(row['cum_len']),
+                                'description': row.get('description', f'Object {obj_id}')
+                            }
+                    
+                    self.data['object_mapping'] = objects
+                    print(f"Loaded object mapping with {len(objects)} objects from {obj_map_file}")
+                    
+            except Exception as e:
+                print(f"Failed to load object mapping from {obj_map_file}: {e}")
+        else:
+            print(f"Object mapping file not found: {obj_map_file}")
+    
     def visualize(self) -> None:
         """Visualize all loaded data in rerun."""
         print("Starting visualization in rerun...")
@@ -485,6 +586,9 @@ class SLAMOutputVisualizer:
         
         if self.config['show_floor'] and 'floor' in self.data:
             self._visualize_floor_plane()
+        
+        if self.config['show_object_mapping'] and 'object_mapping' in self.data:
+            self._visualize_object_mapping()
         
         # Visualize temporal data
         if self.config['show_trajectory'] and 'trajectory' in self.data:
@@ -1181,6 +1285,69 @@ class SLAMOutputVisualizer:
                 radii=[0.01]
             ))
     
+    def _visualize_object_mapping(self) -> None:
+        """Visualize the object mapping data with bounding boxes and centroids."""
+        obj_map_data = self.data['object_mapping']
+        
+        print(f"Visualizing object mapping with {len(obj_map_data)} objects...")
+        
+        # Generate colors for each object
+        import colorsys
+        num_objects = len(obj_map_data)
+        object_colors = []
+        for i in range(num_objects):
+            hue = i / num_objects
+            rgb = colorsys.hsv_to_rgb(hue, 0.8, 0.8)
+            object_colors.append([int(c * 255) for c in rgb])
+        
+        # Visualize each object
+        for i, (obj_id, obj_data) in enumerate(obj_map_data.items()):
+            obj_id = int(obj_id)
+            color = object_colors[i % len(object_colors)]
+            
+            # Extract object data
+            centroid = np.array(obj_data.get('centroid', [0, 0, 0]))
+            aabb = obj_data.get('aabb', [0, 0, 0, 0, 0, 0])
+            description = obj_data.get('description', f'Object {obj_id}')
+            mask_ids = obj_data.get('mask_ids', [])
+            
+            # Calculate bounding box center and size
+            min_x, max_x, min_y, max_y, min_z, max_z = aabb
+            bbox_center = [(min_x + max_x) / 2, (min_y + max_y) / 2, (min_z + max_z) / 2]
+            bbox_size = [max_x - min_x, max_y - min_y, max_z - min_z]
+            
+            # Log object centroid
+            rr.log(f"objects/object_{obj_id}/centroid", rr.Points3D(
+                positions=[centroid],
+                colors=color,
+                radii=[0.05],
+                labels=[f"Centroid {obj_id}"]
+            ), static=True)
+            
+            # Log bounding box
+            rr.log(f"objects/object_{obj_id}/bbox", rr.Boxes3D(
+                centers=[bbox_center],
+                sizes=[bbox_size],
+                colors=[color],
+                labels=[f"Object {obj_id}: {description}"]
+            ), static=True)
+            
+            # Log object information as text
+            info_text = f"Object {obj_id}\nDescription: {description}\nMask IDs: {mask_ids}\nCentroid: ({centroid[0]:.2f}, {centroid[1]:.2f}, {centroid[2]:.2f})"
+            rr.log(f"objects/object_{obj_id}/info", rr.TextDocument(info_text), static=True)
+            
+            # Log object statistics
+            if 'cum_len' in obj_data:
+                rr.log(f"stats/object_{obj_id}/point_count", rr.Scalars(scalars=[obj_data['cum_len']]), static=True)
+            
+            print(f"  Object {obj_id}: {description} at {centroid}")
+        
+        # Log summary statistics
+        total_objects = len(obj_map_data)
+        rr.log("stats/total_objects", rr.Scalars(scalars=[total_objects]), static=True)
+        
+        print(f"Visualized {total_objects} objects with bounding boxes and centroids")
+    
     def _log_view_cone(self, camera_position: np.ndarray, camera_quaternion: np.ndarray,
                       distance: float) -> None:
         """Log camera view cone visualization."""
@@ -1274,12 +1441,14 @@ Examples:
     python visualize_slam_output.py ./outputs --no-view-cones --no-floor
     python visualize_slam_output.py ./outputs --cone-angle 45 --grid-size 5.0
     python visualize_slam_output.py ./outputs --subsample-percentage 0.8 --voxel-size 0.15
+    python visualize_slam_output.py ./outputs --show-object-mapping --color_pointcloud_by_classIds
     
 Note: 
 - View cone settings will be automatically configured from pipeline metadata if available.
 - Point cloud subsampling uses percentage-based reduction to maintain consistent density across steps.
 - The final temporal step always shows 100% of points, earlier steps show the specified percentage.
 - Use --no-subsampling to disable subsampling (may cause memory issues with large temporal datasets).
+- Object mapping visualization shows bounding boxes, centroids, and object information for tracked objects.
         """
     )
     
@@ -1306,6 +1475,8 @@ Note:
                        help='Disable distance lines to closest points')
     parser.add_argument('--no-highlight-floor', action='store_true',
                        help='Disable floor point highlighting')
+    parser.add_argument('--show-object-mapping', action='store_true',
+                       help='Enable object mapping visualization')
     parser.add_argument("--color_pointcloud_by_classIds", action="store_true",
                         help ="Enables colouring by classIds")
 
@@ -1355,7 +1526,8 @@ def main():
         'subsample_percentage': args.subsample_percentage,
         'voxel_size': args.voxel_size,
         'enable_subsampling': not args.no_subsampling,
-        "color_pointcloud_by_classIds": args.color_pointcloud_by_classIds
+        "color_pointcloud_by_classIds": args.color_pointcloud_by_classIds,
+        'show_object_mapping': args.show_object_mapping
     }
     
     try:

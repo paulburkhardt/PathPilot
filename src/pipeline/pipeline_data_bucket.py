@@ -44,7 +44,11 @@ class PipelineDataBucket:
 
         "object_point_cloud",
         "objects",
-        "objects_dict"
+        "object_dict",
+
+        "descriptions",
+        "embeddings"
+
         
     ]
     

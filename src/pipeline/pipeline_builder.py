@@ -9,6 +9,7 @@ from .pipeline_components.object_extractors.incremental_closest_point_finder_com
 from .pipeline_components.data_segmenters.image_data_segmenter import ImageDataSegmenter
 from .pipeline_components.data_segmenters.point_cloud_filter_segmenter import PointCloudFilterSegmenter
 from .pipeline_components.object_databases.bbox_object_database import BBoxObjectDatabase
+from .pipeline_components.data_segmenters.image_embedding_segmenter import ImageEmbeddingSegmenter
 
 
 class PipelineBuilder:
@@ -34,7 +35,8 @@ class PipelineBuilder:
         "IncrementalFloorDetectionComponent": IncrementalFloorDetectionComponent,
         "ImageDataSegmenter": ImageDataSegmenter,
         "PointCloudFilterSegmenter": PointCloudFilterSegmenter,
-        "BBoxObjectDatabase": BBoxObjectDatabase
+        "BBoxObjectDatabase": BBoxObjectDatabase,
+        "ImageEmbeddingSegmenter": ImageEmbeddingSegmenter
 
         
         # Add other components here as they are implemented

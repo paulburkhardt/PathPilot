@@ -13,7 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 class EnhancedSLAMOutputWriter(AbstractDataWriter):
     """
     Enhanced writer component for saving comprehensive SLAM analysis outputs.
-    Handles point clouds, trajectories, floor detection, and closest point analysis.
+    Handles point clouds, trajectories, floor detection, closest point analysis, and object mapping.
     
     Args:
         output_dir: Directory where outputs will be written (default: "enhanced_slam_outputs")
@@ -22,6 +22,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         save_trajectory: Whether to save camera trajectory as TXT file (default: True)
         save_floor_data: Whether to save floor detection results (default: True)
         save_closest_points: Whether to save closest point analysis (default: True)
+        save_object_mapping: Whether to save object mapping (default: True)
         save_intermediate: Whether to save intermediate results every N frames (default: False)
         intermediate_interval: Save interval for intermediate results (default: 10)
         create_timestamped_dir: Whether to create timestamped subdirectory (default: True)
@@ -41,6 +42,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                  save_trajectory: bool = True,
                  save_floor_data: bool = True,
                  save_closest_points: bool = True,
+                 save_object_mapping: bool = True,
                  save_intermediate: bool = False,
                  intermediate_interval: int = 10,
                  create_timestamped_dir: bool = True,
@@ -51,6 +53,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.save_trajectory = save_trajectory
         self.save_floor_data = save_floor_data
         self.save_closest_points = save_closest_points
+        self.save_object_mapping = save_object_mapping
         self.save_intermediate = save_intermediate
         self.intermediate_interval = intermediate_interval
         self.create_timestamped_dir = create_timestamped_dir
@@ -68,6 +71,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.accumulated_n_closest_points_distances = []  # Now stores arrays of n distances
         self.floor_data = None
         self.final_point_cloud = None
+        self.object_mapping = None
         
         # Create output directory structure
         self._setup_output_directory()
@@ -89,6 +93,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "n_closest_points_index", 
                 "n_closest_points_distance_2d"
             ])
+        if self.save_object_mapping:
+            inputs.extend(["objects", "object_dict"])
         # Floor data and closest points are optional and will be handled via optional_inputs
             
         return inputs
@@ -121,6 +127,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
              point_cloud=None, camera_pose=None, timestamp=None,
              floor_normal=None, floor_offset=None,
              n_closest_points_3d=None, n_closest_points_index=None, n_closest_points_distance_2d=None,
+             objects=None, object_dict=None,
              **kwargs: Any) -> Dict[str, Any]:
         """
         Accumulate SLAM analysis data and save according to configuration.
@@ -135,6 +142,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             n_closest_points_3d: Current closest 3D point
             n_closest_points_index: Index of the closest point
             n_closest_points_distance_2d: Current 3D distance to closest point
+            objects: Current frame objects
+            object_dict: Object3D mapping dictionary
             **kwargs: Additional arguments
             
         Returns:
@@ -177,6 +186,10 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         if self.save_point_cloud and point_cloud is not None:
             self.final_point_cloud = point_cloud
         
+        # Store object mapping data when available
+        if self.save_object_mapping and object_dict is not None:
+            self.object_mapping = object_dict
+        
         # Save intermediate results if configured
         if self.save_intermediate and (step_nr + 1) % self.intermediate_interval == 0:
             self._save_intermediate_results(step_nr)
@@ -197,6 +210,10 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         if self.save_closest_points and len(self.accumulated_n_closest_points_distances) > 0:
             closest_path = self._save_closest_points_data()
             results["closest_points_path"] = str(closest_path)
+        
+        if self.save_object_mapping and self.object_mapping is not None:
+            object_path = self._save_object_mapping_data()
+            results["object_mapping_path"] = str(object_path)
         
         # Save metadata
         self._save_metadata(results, step_nr)
@@ -401,6 +418,63 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                     
         return closest_path
     
+    def _save_object_mapping_data(self) -> pathlib.Path:
+        """Save Object3D mapping data."""
+        if self.analysis_format == 'json':
+            object_path = self.final_output_dir / f"{self.output_name}_object_mapping.json"
+            
+            # Convert Object3D objects to serializable format
+            serializable_objects = {}
+            for obj_id, obj in self.object_mapping.items():
+                serializable_objects[str(obj_id)] = {
+                    "id": obj.id,
+                    "mask_ids": list(obj.mask_id),
+                    "centroid": obj.centroid.tolist() if isinstance(obj.centroid, np.ndarray) else obj.centroid,
+                    "aabb": obj.aabb,
+                    "cum_sum": obj.cum_sum.tolist() if isinstance(obj.cum_sum, np.ndarray) else obj.cum_sum,
+                    "cum_len": obj.cum_len,
+                    "description": obj.description,
+                    "embeddings_shape": obj.embeddings.shape if obj.embeddings is not None else None,
+                    "running_embedding_shape": obj.running_embedding.shape if obj.running_embedding is not None else None,
+                    "running_embedding_weight": obj.running_embedding_weight
+                }
+            
+            data = {
+                "object_mapping": serializable_objects,
+                "total_objects": len(self.object_mapping),
+                "object_ids": list(self.object_mapping.keys())
+            }
+            
+            with open(object_path, 'w') as f:
+                json.dump(data, f, indent=2)
+        else:  # csv
+            object_path = self.final_output_dir / f"{self.output_name}_object_mapping.csv"
+            with open(object_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['object_id', 'mask_ids', 'centroid_x', 'centroid_y', 'centroid_z', 
+                               'aabb_min_x', 'aabb_max_x', 'aabb_min_y', 'aabb_max_y', 'aabb_min_z', 'aabb_max_z',
+                               'cum_sum_x', 'cum_sum_y', 'cum_sum_z', 'cum_len', 'description'])
+                
+                for obj_id, obj in self.object_mapping.items():
+                    mask_ids_str = ','.join(map(str, obj.mask_id))
+                    centroid = obj.centroid
+                    aabb = obj.aabb
+                    cum_sum = obj.cum_sum
+                    
+                    row = [
+                        obj_id,
+                        mask_ids_str,
+                        centroid[0], centroid[1], centroid[2],
+                        aabb[0], aabb[1], aabb[2], aabb[3], aabb[4], aabb[5],
+                        cum_sum[0], cum_sum[1], cum_sum[2],
+                        obj.cum_len,
+                        obj.description or ""
+                    ]
+                    writer.writerow(row)
+        
+        print(f"Saving object mapping with {len(self.object_mapping)} objects to: {object_path}")
+        return object_path
+    
     def _save_intermediate_results(self, step_nr: int) -> None:
         """Save intermediate results for this step."""
         intermediate_dir = self.final_output_dir / "intermediate" / f"step_{step_nr:06d}"
@@ -536,6 +610,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "save_trajectory": self.save_trajectory,
                 "save_floor_data": self.save_floor_data,
                 "save_closest_points": self.save_closest_points,
+                "save_object_mapping": self.save_object_mapping,
                 "save_intermediate": self.save_intermediate,
                 "intermediate_interval": self.intermediate_interval,
                 "analysis_format": self.analysis_format,
@@ -546,7 +621,9 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "total_poses": len(self.accumulated_timestamps),
                 "trajectory_duration": (max(self.accumulated_timestamps) - min(self.accumulated_timestamps)) if len(self.accumulated_timestamps) > 1 else 0,
                 "has_floor_data": self.floor_data is not None,
-                "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances)
+                "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
+                "has_object_mapping": self.object_mapping is not None,
+                "total_objects": len(self.object_mapping) if self.object_mapping is not None else 0
             },
             "file_paths": results
         }
