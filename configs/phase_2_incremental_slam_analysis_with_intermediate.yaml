@@ -29,19 +29,20 @@ pipeline:
         downsample_rate : 1
         min_cluster_size: 1000
         neighbor_distance:  0.05
+        ignore_backround: True 
 
     - type: ImageEmbeddingSegmenter
       config:
-        text: "A picture of"
+        text: "In this room is a" # the prompt to generat
 
 
     - type: BBoxObjectDatabase
       config: 
-        match_threshold : 0.1 
-        embedding_weight : 0.7
-        running_embedding_weight  :  0.8 
+        match_threshold : 0.5
+        embedding_weight : 0.85
+        running_embedding_weight  :  0.7 
         knn_count  :  4
-        use_blip  :  False 
+        use_blip  :  True 
         use_fusion  :  False
 
 

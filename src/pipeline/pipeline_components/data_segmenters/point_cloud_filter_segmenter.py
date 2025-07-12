@@ -20,12 +20,14 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
     def __init__(self, 
                 downsample_rate : int = 4,
                 min_cluster_size: int = 100,
-                neighbor_distance:  float = 0.05
+                neighbor_distance:  float = 0.05,
+                ignore_backround : bool = True 
                 ) -> None:
         super().__init__()
         self.downsample_rate = downsample_rate # needs to be int
         self.min_cluster_size = min_cluster_size
         self.neighbor_distance = neighbor_distance
+        self.ignore_backround = ignore_backround
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -64,6 +66,10 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         object_pointclouds = {}
         all_points = []
         for obj_id, arr in zip(unique_ids, np.split(sorted_pc, splits)):
+
+            if obj_id == 0 and self.ignore_backround: #NOTE its good to do this since we also dont have a mask for it
+                continue
+
             points = arr[:, :-1]
             # Remove all-zero points
             if len(points) > 0:

@@ -26,21 +26,28 @@ class Object3D:
 
         self.cum_sum = np.sum(points,axis= 0).astype(float) 
         self.cum_len = points.shape[0]
+        self.original_len = points.shape[0]
 
         #self.points = points
         if embedding is not None: 
             self.embeddings = embedding
             self.running_embedding = F.normalize(embedding, p=2, dim=-1)
-            # self.running_embedding /= np.linalg.norm(self.running_embedding) # ia already normed
-            self.running_embedding_weight = running_embedding_weight
         else: 
             self.embeddings = None
+            self.running_embedding = None
+        self.running_embedding_weight = running_embedding_weight
 
 
     def update(self,mask_id,new_points, new_embedding):
         self.mask_id.add(mask_id)
+        
+        new_len = new_points.shape[0] 
+        if new_len  > self.original_len:
+            self.description = new_len
+            self.original_len = new_len
+
         self.cum_sum += np.sum(new_points, axis= 0).astype(float) 
-        self.cum_len += new_points.shape[0]
+        self.cum_len += new_len
         #self.points = np.vstack([self.points,new_points])
 
         self.centroid = self.cum_sum / self.cum_len
@@ -53,6 +60,11 @@ class Object3D:
 
     def fuse(self, obj):
         self.mask_id.update(obj.mask_id)
+        
+        if obj.original_len > self.original_len:
+            self.description = obj.description
+            self.original_len = obj.original_len
+
         self.cum_sum += obj.cum_sum
         self.cum_len += obj.cum_len
         # self.points = np.vstack([self.points,obj.points])
@@ -122,7 +134,8 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
         inputs= ["object_point_cloud","camera_pose"]
 
         if self.use_blip:
-            inputs.append("embeddings", "descriptions")
+            inputs.append("embeddings")
+            inputs.append("descriptions")
         return inputs 
     
     @property
@@ -140,7 +153,6 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
         Raises:
             NotImplementedError: As this is currently a placeholder
         """
-
 
         self.add_frame(object_point_cloud, embeddings, descriptions)
         translation = tuple(camera_pose.translation().flatten().cpu().numpy())[:3]
@@ -203,12 +215,14 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
 
             if self.use_blip and embeddings_vector is not None:
                 embeddings_matrix = torch.stack([self.objects_map[oid].running_embedding for oid in object_ids])
-                emb_dists = (1 - (embeddings_matrix @ embeddings_vector.T)).cpu().numpy()
+                emb_dists = (1 - (embeddings_matrix @ embeddings_vector.T)).cpu().numpy().flatten()
             else:
                 emb_dists = np.ones(len(object_ids))
 
             scores = (1 - self.embedding_weight) * geo_dists * overlap_dists + self.embedding_weight * emb_dists
-
+            
+            scores = scores.flatten()
+            
             best_idx = np.argmin(scores)
             best_obj_id = oid_idx_map.inverse[best_idx]
             best_score = float(np.array(scores[best_idx]).flatten()[0])

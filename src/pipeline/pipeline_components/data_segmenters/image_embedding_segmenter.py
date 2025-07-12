@@ -214,12 +214,11 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
 
             # 8. Extract embedding vector (mean‑pool object patches + normalize)
             obj_emb = patch_embeds_masked[flat_mask.bool()].mean(dim=0)
-            normalized_embedding = F.normalize(obj_emb, p=2, dim=-1)
+            normalized_embedding = F.normalize(obj_emb, p=2, dim=-1).unsqueeze(0)  # Add batch dimension
 
             # 9. Generate caption using masked encoder with better prompting
             # Use a simple prompt for adjective + object format
-            prompt = "A"
-            dec_input = self.processor.tokenizer(prompt, return_tensors="pt").to(self.device)
+            dec_input = self.processor.tokenizer(self.text, return_tensors="pt").to(self.device)
             
             generated = self.model.text_decoder.generate(
                 input_ids=dec_input.input_ids,
@@ -245,7 +244,6 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
             # generated_ids = self.model.generate(pixel_values=inputs.pixel_values, max_length=50)
             # generated_caption = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
             
-            print(f"Embedding vector generated. Shape: {normalized_embedding.shape}")
             print(f"Generated Caption: '{generated_caption}'")
 
         return generated_caption, normalized_embedding
