@@ -7,6 +7,7 @@ from .pipeline_components.data_writers.enhanced_slam_output_writer import Enhanc
 from .pipeline_components.data_segmenters.incremental_floor_detection_component import IncrementalFloorDetectionComponent
 from .pipeline_components.object_extractors.incremental_closest_point_finder_component import IncrementalClosestPointFinderComponent
 from .pipeline_components.data_segmenters.image_data_segmenter import ImageDataSegmenter
+from .pipeline_components.data_segmenters.yolo_segmenter import YOLOSegmenter
 
 class PipelineBuilder:
     """
@@ -29,7 +30,8 @@ class PipelineBuilder:
         "EnhancedSLAMOutputWriter": EnhancedSLAMOutputWriter,
         "IncrementalClosestPointFinderComponent": IncrementalClosestPointFinderComponent,
         "IncrementalFloorDetectionComponent": IncrementalFloorDetectionComponent,
-        "ImageDataSegmenter": ImageDataSegmenter
+        "ImageDataSegmenter": ImageDataSegmenter,
+        "YOLOSegmenter": YOLOSegmenter
         
         # Add other components here as they are implemented
     }
