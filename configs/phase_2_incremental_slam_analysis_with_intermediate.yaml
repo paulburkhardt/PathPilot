@@ -3,17 +3,29 @@ pipeline:
     # Load video data for SLAM processing
     - type: MAST3RSLAMVideoDataset
       config:
-        video_path: Data/Videos/one_chair.mp4
+        video_path: Data/Videos/two_chairs_and_trash.mp4
         mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/no_calib.yaml"
+
+    # Run the yolo segmenter
+    - type: YOLOSegmenter
+      config:
+        model_path: "models/yolov8s-oiv7.pt"
+        detection_interval: 1  # Run YOLO every 5 frames for performance
+        conf_threshold: 0.3  # Confidence threshold for detections
+        iou_threshold: 0.5    # IoU threshold for NMS
+        max_detections: 20    # Maximum detections per image
+        device: "cuda"        # Use GPU if available
     
-    # Run the Image segmenter
+    # Run SAM2 segmentation using YOLO bounding boxes as prompts
     - type: ImageDataSegmenter
       config:
         model_cfg_path: "sam2.1/sam2.1_hiera_t.yaml"
         checkpoint_path: "segment_anything_2/checkpoints/sam2.1_hiera_tiny.pt"
-        automask_interval: 30
-        number_of_objects: 10
-        min_mask_region_area : 500
+        detection_interval: 1    # Use YOLO detections every 5 frames (matches YOLO interval)
+        min_mask_region_area: 200  # Minimum area for valid masks
+        device: "cuda"           # Use GPU if available
+        save_debug_images: true  # Enable debug image saving
+        debug_output_dir: "debug_phase2_segmentation"  # Directory for debug images
 
 
     # Run MAST3R SLAM to generate point cloud and trajectory incrementally
@@ -50,6 +62,7 @@ pipeline:
         save_trajectory: true
         save_floor_data: true
         save_closest_points: true
+        save_yolo_detections: true  # Save YOLO detection results
         save_intermediate: true  # Save intermediate results
         intermediate_interval: 10   # Save intermediate results every 5 frames
         create_timestamped_dir: true

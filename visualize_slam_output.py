@@ -635,6 +635,10 @@ class SLAMOutputVisualizer:
         # Highlight floor points if floor data is available
         if self.config['highlight_floor_points'] and 'floor' in self.data:
             self._highlight_floor_points(points, colors)
+            
+        # Show segmentation masks separately if requested
+        if self.config.get('show_segmentation_masks_separately', False) and has_classIds:
+            self._log_segmentation_masks_separately_static(points, colors, classIds)
     
     def _highlight_floor_points(self, points: np.ndarray, colors: Optional[np.ndarray]) -> None:
         """Highlight floor points in the point cloud."""
@@ -668,6 +672,53 @@ class SLAMOutputVisualizer:
             ), static=True)
             
         print(f"Highlighted {np.sum(floor_mask)} floor points out of {len(points)} total points")
+    
+    def _log_segmentation_masks_separately_static(self, points: np.ndarray, colors: Optional[np.ndarray], classIds: np.ndarray) -> None:
+        """Log segmentation masks as separate static entities for each class."""
+        unique_class_ids = np.unique(classIds)
+        
+        # Define a color map for different classes
+        class_colors = [
+            [255, 0, 0],    # Red
+            [0, 255, 0],    # Green  
+            [0, 0, 255],    # Blue
+            [255, 255, 0],  # Yellow
+            [255, 0, 255],  # Magenta
+            [0, 255, 255],  # Cyan
+            [255, 128, 0],  # Orange
+            [128, 0, 255],  # Purple
+            [255, 192, 203], # Pink
+            [128, 128, 128], # Gray
+            [139, 69, 19],   # Brown
+            [0, 128, 0],     # Dark Green
+        ]
+        
+        for i, class_id in enumerate(unique_class_ids):
+            if class_id == 0:  # Skip background class
+                continue
+                
+            # Get points belonging to this class
+            class_mask = classIds == class_id
+            class_points = points[class_mask]
+            
+            if len(class_points) == 0:
+                continue
+                
+            # Use original colors if available, otherwise use class-specific color
+            if colors is not None:
+                class_point_colors = colors[class_mask]
+            else:
+                class_color = class_colors[i % len(class_colors)]
+                class_point_colors = [class_color] * len(class_points)
+            
+            # Log this class as a separate static entity
+            rr.log(f"world/segmentation/class_{class_id:03d}", rr.Points3D(
+                class_points,
+                colors=class_point_colors,
+                radii=[0.008]  # Slightly smaller radius for individual classes
+            ), static=True)
+            
+        print(f"Logged {len(unique_class_ids)} segmentation classes separately")
     
     def _visualize_floor_plane(self) -> None:
         """Visualize the floor plane as a grid."""
@@ -1017,8 +1068,7 @@ class SLAMOutputVisualizer:
         if color_by_class and has_classIds:
             rr.log(
             "world/pointcloud_colored_by_class",
-            rr.Points3D(points, class_ids=classIds),
-            static=True
+            rr.Points3D(points, class_ids=classIds)
             )
         elif has_colors:
             # Convert colors from [0,1] to [0,255] if needed
@@ -1027,33 +1077,33 @@ class SLAMOutputVisualizer:
             if has_classIds:
                 rr.log(
                     "world/pointcloud",
-                    rr.Points3D(points, colors=colors, class_ids=classIds),
-                    static=True
+                    rr.Points3D(points, colors=colors, class_ids=classIds)
                 )
             else:
                 rr.log(
                     "world/pointcloud",
-                    rr.Points3D(points, colors=colors),
-                    static=True
+                    rr.Points3D(points, colors=colors)
                 )
         else:
             default_color = [128, 128, 128]
             if has_classIds:
                 rr.log(
                     "world/pointcloud",
-                    rr.Points3D(points, colors=default_color, class_ids=classIds),
-                    static=True
+                    rr.Points3D(points, colors=default_color, class_ids=classIds)
                 )
             else:
                 rr.log(
                     "world/pointcloud",
-                    rr.Points3D(points, colors=default_color),
-                    static=True
+                    rr.Points3D(points, colors=default_color)
                 )
 
         # Highlight floor points if floor data is available
         if self.config['highlight_floor_points'] and 'floor' in self.data:
             self._highlight_floor_points_temporal(points, colors)
+            
+        # Show segmentation masks separately if requested
+        if self.config.get('show_segmentation_masks_separately', False) and has_classIds:
+            self._log_segmentation_masks_separately(points, colors, classIds)
     
     def _spatially_subsample_points(self, points: np.ndarray, colors: Optional[np.ndarray],classIds:Optional[np.ndarray], is_final_step: bool = False) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
@@ -1265,6 +1315,51 @@ class SLAMOutputVisualizer:
         print(f"  Voxel filtering: {len(points)} -> {len(filtered_points)} points (voxel_size: {voxel_size:.3f})")
         return filtered_points, filtered_colors, filtered_classIds
     
+    def _log_segmentation_masks_separately(self, points: np.ndarray, colors: Optional[np.ndarray], classIds: np.ndarray) -> None:
+        """Log segmentation masks as separate entities for each class."""
+        unique_class_ids = np.unique(classIds)
+        
+        # Define a color map for different classes
+        class_colors = [
+            [255, 0, 0],    # Red
+            [0, 255, 0],    # Green  
+            [0, 0, 255],    # Blue
+            [255, 255, 0],  # Yellow
+            [255, 0, 255],  # Magenta
+            [0, 255, 255],  # Cyan
+            [255, 128, 0],  # Orange
+            [128, 0, 255],  # Purple
+            [255, 192, 203], # Pink
+            [128, 128, 128], # Gray
+            [139, 69, 19],   # Brown
+            [0, 128, 0],     # Dark Green
+        ]
+        
+        for i, class_id in enumerate(unique_class_ids):
+            if class_id == 0:  # Skip background class
+                continue
+                
+            # Get points belonging to this class
+            class_mask = classIds == class_id
+            class_points = points[class_mask]
+            
+            if len(class_points) == 0:
+                continue
+                
+            # Use original colors if available, otherwise use class-specific color
+            if colors is not None:
+                class_point_colors = colors[class_mask]
+            else:
+                class_color = class_colors[i % len(class_colors)]
+                class_point_colors = [class_color] * len(class_points)
+            
+            # Log this class as a separate entity
+            rr.log(f"world/segmentation/class_{class_id:03d}", rr.Points3D(
+                class_points,
+                colors=class_point_colors,
+                radii=[0.008]  # Slightly smaller radius for individual classes
+            ))
+
     def _highlight_floor_points_temporal(self, points: np.ndarray, colors: Optional[np.ndarray]) -> None:
         """Highlight floor points in the temporal point cloud."""
         if 'floor' not in self.data:
@@ -1578,6 +1673,7 @@ Examples:
     python visualize_slam_output.py ./outputs --no-view-cones --no-floor --no-video
     python visualize_slam_output.py ./outputs --cone-angle 45 --grid-size 5.0
     python visualize_slam_output.py ./outputs --subsample-percentage 0.8 --voxel-size 0.15
+    python visualize_slam_output.py ./outputs --color_pointcloud_by_classIds --show_segmentation_masks_separately
     python visualize_slam_output.py ./outputs --subsample-percentage 0.8
     python visualize_slam_output.py ./outputs --warning-distance-critical 0.15 --warning-distance-caution 0.8
     python visualize_slam_output.py ./outputs --no-warnings
@@ -1588,6 +1684,8 @@ Note:
 - Point cloud subsampling uses percentage-based reduction to maintain consistent density across steps.
 - The final temporal step always shows 100% of points, earlier steps show the specified percentage.
 - Use --no-subsampling to disable subsampling (may cause memory issues with large temporal datasets).
+- Segmentation masks are now temporal and only show for the current frame when playing back the trajectory.
+- Use --show_segmentation_masks_separately to view each segmentation class as a separate entity in the scene tree.
 - Video synchronization uses step-based mapping: trajectory steps are evenly distributed across video frames.
 - Video will be automatically loaded from pipeline configuration if available.
 - Warning system provides proximity alerts with color-coded visualization and directional guidance.
@@ -1621,6 +1719,8 @@ Note:
                        help='Disable floor point highlighting')
     parser.add_argument("--color_pointcloud_by_classIds", action="store_true",
                         help ="Enables colouring by classIds")
+    parser.add_argument("--show_segmentation_masks_separately", action="store_true",
+                        help="Show segmentation masks as separate entities per class")
 
     parser.add_argument('--no-video', action='store_true',
                        help='Disable video visualization')
@@ -1688,6 +1788,7 @@ def main():
         'voxel_size': args.voxel_size,
         'enable_subsampling': not args.no_subsampling,
         "color_pointcloud_by_classIds": args.color_pointcloud_by_classIds,
+        "show_segmentation_masks_separately": args.show_segmentation_masks_separately,
         'video_sync_tolerance': args.video_sync_tolerance,
         # Warning system configuration
         'enable_warnings': not args.no_warnings,
