@@ -6,6 +6,7 @@ from .pipeline_components.datasets.mast3r_slam_video_dataset import MAST3RSLAMVi
 from .pipeline_components.data_writers.enhanced_slam_output_writer import EnhancedSLAMOutputWriter
 from .pipeline_components.data_segmenters.incremental_floor_detection_component import IncrementalFloorDetectionComponent
 from .pipeline_components.object_extractors.incremental_closest_point_finder_component import IncrementalClosestPointFinderComponent
+from .pipeline_components.data_segmenters.image_data_segmenter import ImageDataSegmenter
 
 class PipelineBuilder:
     """
@@ -27,7 +28,9 @@ class PipelineBuilder:
         "MAST3RSLAMVideoDataset": MAST3RSLAMVideoDataset,
         "EnhancedSLAMOutputWriter": EnhancedSLAMOutputWriter,
         "IncrementalClosestPointFinderComponent": IncrementalClosestPointFinderComponent,
-        "IncrementalFloorDetectionComponent": IncrementalFloorDetectionComponent
+        "IncrementalFloorDetectionComponent": IncrementalFloorDetectionComponent,
+        "ImageDataSegmenter": ImageDataSegmenter
+        
         # Add other components here as they are implemented
     }
     
