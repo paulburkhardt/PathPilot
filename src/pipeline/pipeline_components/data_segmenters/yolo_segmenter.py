@@ -153,7 +153,7 @@ class YOLOSegmenter(AbstractDataSegmenter):
                 "bbox": box.tolist(),  # [x1, y1, x2, y2]
                 "confidence": float(conf),
                 "class_id": int(cls_id),
-                "detection_id": i
+                "detection_id": i + 1
             }
             
             # Add to detections dictionary

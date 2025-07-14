@@ -21,13 +21,15 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
                 downsample_rate : int = 4,
                 min_cluster_size: int = 100,
                 neighbor_distance:  float = 0.05,
-                ignore_backround : bool = True 
+                ignore_backround : bool = True,
+                rewrite_pointcloud: bool = False 
                 ) -> None:
         super().__init__()
         self.downsample_rate = downsample_rate # needs to be int
         self.min_cluster_size = min_cluster_size
         self.neighbor_distance = neighbor_distance
         self.ignore_backround = ignore_backround
+        self.rewrite_pointcloud = rewrite_pointcloud
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -37,7 +39,10 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
     @property
     def outputs_to_bucket(self) -> List[str]:
         """This component outputs segmented point clouds."""
-        return ["object_point_cloud", "point_cloud", ]
+        output = ["object_point_cloud" ]
+        if self.rewrite_pointcloud:
+           output.append("point_cloud" ) 
+        return output
     
     def _run(self, point_cloud: Any, key_frame_flag, **kwargs: Any) -> Dict[str, Any]:
         """
@@ -49,9 +54,12 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         Raises:
             NotImplementedError: As this is currently a placeholder
         """
-        # if key_frame_flag:
-        #     return {"object_point_cloud": None, 
-        #             "point_cloud": point_cloud}
+        if not key_frame_flag:
+            output = {"object_point_cloud": None }
+            if self.rewrite_pointcloud:
+                output["point_cloud"]  = point_cloud
+            return output
+ 
         
         pointcloud = point_cloud.as_numpy(with_rgb = True, 
                                           with_confidence_score = True ,
@@ -59,6 +67,8 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         ids = pointcloud[:, -1]
         sorted_pc = pointcloud[np.argsort(ids)]
         unique_ids, counts = np.unique(ids, return_counts=True)
+        print("unique ids of the pointcloud")
+        print(unique_ids)
         # splits = np.cumsum(counts)[:-1]
         splits = np.cumsum(counts)[:-1]
         
@@ -89,16 +99,18 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
                     all_points.append(np.hstack([filtered_points, obj_ids_col]))
 
         combined_pointcloud = None
-        if all_points:
+        if self.rewrite_pointcloud and all_points:
             combined_points = np.vstack(all_points)
             combined_pointcloud = PointCloudDataEntity(combined_points[:,:3],
                                                        combined_points[:,3:6],
                                                        combined_points[:,6].reshape(-1, 1),
                                                        combined_points[:,-1].astype(np.int32).reshape(-1, 1))
 
-        return {"object_point_cloud": object_pointclouds, 
-                "point_cloud": combined_pointcloud}
-    
+
+        output = {"object_point_cloud": object_pointclouds }
+        if self.rewrite_pointcloud:
+            output["point_cloud"]  = point_cloud
+        return output
     
     
     

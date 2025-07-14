@@ -539,6 +539,11 @@ class SLAMOutputVisualizer:
                                 float(row['cum_sum_z'])
                             ]
                             
+                            # Parse points_file if present
+                            points_file = row.get('points_file', None)
+                            if points_file is not None and points_file.strip() == '':
+                                points_file = None
+                            
                             objects[str(obj_id)] = {
                                 'id': obj_id,
                                 'mask_ids': mask_ids,
@@ -546,7 +551,8 @@ class SLAMOutputVisualizer:
                                 'aabb': aabb,
                                 'cum_sum': cum_sum,
                                 'cum_len': int(row['cum_len']),
-                                'description': row.get('description', f'Object {obj_id}')
+                                'description': row.get('description', f'Object {obj_id}'),
+                                'points_file': points_file
                             }
                     
                     self.data['object_mapping'] = objects
@@ -1434,6 +1440,20 @@ class SLAMOutputVisualizer:
             # Log object statistics
             if 'cum_len' in obj_data:
                 rr.log(f"stats/object_{obj_id}/point_count", rr.Scalars(scalars=[obj_data['cum_len']]), static=True)
+            
+            # Log object points if points_file is present
+            points_file = obj_data.get('points_file', None)
+            if points_file is not None and Path(points_file).exists():
+                try:
+                    obj_points = np.load(points_file)
+                    rr.log(f"objects/object_{obj_id}/points", rr.Points3D(
+                        positions=obj_points,
+                        colors=color,
+                        radii=[0.01],
+                        labels=[f"Object {obj_id} points"]
+                    ), static=True)
+                except Exception as e:
+                    print(f"  Could not load points for object {obj_id} from {points_file}: {e}")
             
             print(f"  Object {obj_id}: {description} at {centroid}")
         

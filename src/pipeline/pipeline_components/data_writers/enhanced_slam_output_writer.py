@@ -464,6 +464,12 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             # Convert Object3D objects to serializable format
             serializable_objects = {}
             for obj_id, obj in self.object_mapping.items():
+                # Save points to a separate .npy file if available
+                points_file = None
+                if hasattr(obj, 'points') and obj.points is not None:
+                    points_file = self.final_output_dir / f"object_{obj_id}_points.npy"
+                    np.save(points_file, obj.points)
+                    points_file = str(points_file)
                 serializable_objects[str(obj_id)] = {
                     "id": obj.id,
                     "mask_ids": list(obj.mask_id),
@@ -474,15 +480,14 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                     "description": obj.description,
                     "embeddings_shape": obj.embeddings.shape if obj.embeddings is not None else None,
                     "running_embedding_shape": obj.running_embedding.shape if obj.running_embedding is not None else None,
-                    "running_embedding_weight": obj.running_embedding_weight
+                    "running_embedding_weight": obj.running_embedding_weight,
+                    "points_file": points_file
                 }
-            
             data = {
                 "object_mapping": serializable_objects,
                 "total_objects": len(self.object_mapping),
                 "object_ids": list(self.object_mapping.keys())
             }
-            
             with open(object_path, 'w') as f:
                 json.dump(data, f, indent=2)
         else:  # csv
@@ -491,14 +496,18 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 writer = csv.writer(f)
                 writer.writerow(['object_id', 'mask_ids', 'centroid_x', 'centroid_y', 'centroid_z', 
                                'aabb_min_x', 'aabb_max_x', 'aabb_min_y', 'aabb_max_y', 'aabb_min_z', 'aabb_max_z',
-                               'cum_sum_x', 'cum_sum_y', 'cum_sum_z', 'cum_len', 'description'])
+                               'cum_sum_x', 'cum_sum_y', 'cum_sum_z', 'cum_len', 'description', 'points_file'])
                 
                 for obj_id, obj in self.object_mapping.items():
                     mask_ids_str = ','.join(map(str, obj.mask_id))
                     centroid = obj.centroid
                     aabb = obj.aabb
                     cum_sum = obj.cum_sum
-                    
+                    points_file = ''
+                    if hasattr(obj, 'points') and obj.points is not None:
+                        points_file_path = self.final_output_dir / f"object_{obj_id}_points.npy"
+                        np.save(points_file_path, obj.points)
+                        points_file = str(points_file_path)
                     row = [
                         obj_id,
                         mask_ids_str,
@@ -506,7 +515,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                         aabb[0], aabb[1], aabb[2], aabb[3], aabb[4], aabb[5],
                         cum_sum[0], cum_sum[1], cum_sum[2],
                         obj.cum_len,
-                        obj.description or ""
+                        obj.description or "",
+                        points_file
                     ]
                     writer.writerow(row)
         
@@ -786,7 +796,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "has_floor_data": self.floor_data is not None,
                 "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
                 "yolo_detections_count": len(self.accumulated_yolo_detections),
-                "segmentation_labels_count": len(self.accumulated_segmentation_labels)
+                "segmentation_labels_count": len(self.accumulated_segmentation_labels),
                 "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
                 "has_object_mapping": self.object_mapping is not None,
                 "total_objects": len(self.object_mapping) if self.object_mapping is not None else 0

@@ -58,6 +58,12 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
         Returns:
             Dictionary containing embeddings and descriptions
         """
+        if not key_frame_flag:
+            return {
+            "embeddings": None,
+            "descriptions": None
+            }
+
         embeddings = {}
         descriptions = {}
 
@@ -225,7 +231,7 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
                 attention_mask=dec_input.attention_mask,
                 encoder_hidden_states=encoder_hidden_states,
                 encoder_attention_mask=encoder_attention_mask,
-                max_new_tokens=5,
+                max_new_tokens=4,
                 do_sample=True,
                 temperature=0.6,
                 top_p=0.8,
@@ -239,6 +245,9 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
                 generated_caption = generated_caption[2:].strip()
             elif generated_caption.startswith("an "):
                 generated_caption = generated_caption[3:].strip()
+            elif generated_caption.startswith(self.text):
+                generated_caption = generated_caption[len(self.text):].strip()
+
 
             # # Generate a Caption for the Masked Object
             # generated_ids = self.model.generate(pixel_values=inputs.pixel_values, max_length=50)

@@ -412,6 +412,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         X,C = None, None
 
         add_new_kf = False
+        init_kf = False
+
         if mode == Mode.INIT:
             # Initialize via mono inference, and encoded features neeed for database
             X_init, C_init = mast3r_inference_mono(self.model, frame)
@@ -420,7 +422,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             self.states.queue_global_optimization(len(self.keyframes) - 1)
             self.states.set_mode(Mode.TRACKING)
             self.states.set_frame(frame)
-            
+            init_kf = True
+
         elif mode == Mode.TRACKING:
             add_new_kf, match_info, try_reloc = self.tracker.track(frame)
             if try_reloc:
@@ -499,7 +502,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                 segmentation_masks = np.concatenate(segmentation_masks,axis=0)
 
         #update the pointcloud with every frame, but only have parts of the color
-        elif self.point_cloud_method == "refreshing" and add_new_kf:
+        elif self.point_cloud_method == "refreshing" and (add_new_kf or init_kf):
 
             if self.segment_point_cloud:
                 raise NotImplementedError("segmentation currently only available for accumulating mode.")
@@ -538,5 +541,5 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         return {
             "point_cloud": point_cloud_data_entity,
             "camera_pose": T_WC,
-            "key_frame_flag": add_new_kf
+            "key_frame_flag": add_new_kf or init_kf
         }

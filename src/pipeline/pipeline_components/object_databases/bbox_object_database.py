@@ -16,7 +16,8 @@ class Object3D:
                  centroid, 
                  description = None,
                  embedding=None,
-                 running_embedding_weight = 0.8
+                 running_embedding_weight = 0.8,
+                 track_points =False
                  ):
         self.id = obj_id
         self.mask_id = {mask_id}
@@ -28,7 +29,10 @@ class Object3D:
         self.cum_len = points.shape[0]
         self.original_len = points.shape[0]
 
-        #self.points = points
+        self.track_points = track_points
+        if self.track_points:
+            self.points = points
+
         if embedding is not None: 
             self.embeddings = embedding
             self.running_embedding = F.normalize(embedding, p=2, dim=-1)
@@ -38,17 +42,19 @@ class Object3D:
         self.running_embedding_weight = running_embedding_weight
 
 
-    def update(self,mask_id,new_points, new_embedding):
+    def update(self,mask_id,new_points, new_embedding, description):
         self.mask_id.add(mask_id)
         
         new_len = new_points.shape[0] 
         if new_len  > self.original_len:
-            self.description = new_len
+            self.description = description
             self.original_len = new_len
 
         self.cum_sum += np.sum(new_points, axis= 0).astype(float) 
         self.cum_len += new_len
-        #self.points = np.vstack([self.points,new_points])
+
+        if self.track_points:
+            self.points = np.vstack([self.points,new_points])
 
         self.centroid = self.cum_sum / self.cum_len
         self.aabb = self.update_aabb(self.aabb,self.get_aabb(new_points))
@@ -67,7 +73,9 @@ class Object3D:
 
         self.cum_sum += obj.cum_sum
         self.cum_len += obj.cum_len
-        # self.points = np.vstack([self.points,obj.points])
+        
+        if self.track_points:
+            self.points = np.vstack([self.points,obj.points])
 
         self.centroid = self.cum_sum / self.cum_len
         self.aabb = self.update_aabb(self.aabb, obj.aabb) 
@@ -107,7 +115,9 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
                  running_embedding_weight = 0.8, 
                  knn_count = 4,
                  use_blip = False, 
-                 use_fusion = False) -> None:
+                 use_fusion = False,
+                 enable_same_mask_tracking = True,
+                 track_points = False) -> None:
         super().__init__()
 
         p = index.Property()
@@ -125,17 +135,19 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
         self.use_fusion = use_fusion
         self.running_embedding_weight = running_embedding_weight
         self.obj_id_counter = 1
-
+        self.enable_same_mask_tracking =enable_same_mask_tracking
+        self.track_points = track_points
 
     
     @property
     def inputs_from_bucket(self) -> List[str]:
         """This component requires Gaussian object data as input."""
-        inputs= ["object_point_cloud","camera_pose"]
+        inputs= ["object_point_cloud","camera_pose","key_frame_flag"]
 
         if self.use_blip:
             inputs.append("embeddings")
             inputs.append("descriptions")
+            inputs.append("segmentation_labels")
         return inputs 
     
     @property
@@ -143,7 +155,7 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
         """This component outputs database information."""
         return ["objects","object_dict"]
     
-    def _run(self, object_point_cloud: Any, camera_pose, embeddings: Dict = None, descriptions: Dict = None, **kwargs: Any) -> Dict[str, Any]:
+    def _run(self, object_point_cloud: Any, camera_pose, key_frame_flag: bool ,embeddings: Dict = None, descriptions: Dict = None, segmentation_labels: Dict = None ,**kwargs: Any) -> Dict[str, Any]:
         """
         Store and manage Gaussian objects in the database.
         
@@ -154,7 +166,10 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
             NotImplementedError: As this is currently a placeholder
         """
 
-        self.add_frame(object_point_cloud, embeddings, descriptions)
+
+        if key_frame_flag:
+            self.add_frame(object_point_cloud, embeddings, descriptions, segmentation_labels )
+
         translation = tuple(camera_pose.translation().flatten().cpu().numpy())[:3]
         object_ids = self.query_objects(translation, "KNN")
         objects = [self.objects_map[obj_id] for obj_id in object_ids] #TODO Change to an intersection before the camera
@@ -164,18 +179,25 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
     
 
 
-    def add_frame(self, segmented_pointclouds, embeddings: Dict = None, descriptions: Dict = None):
+    def add_frame(self, segmented_pointclouds, embeddings: Dict = None, descriptions: Dict = None, segmentation_labels: Dict = None):
+        if segmented_pointclouds is None: 
+            return        
         if embeddings is None:
             embeddings = {}
             descriptions = {}
+            segmentation_labels = {}
         updated_objects = []
         for mask_key, segmented_pointcloud in segmented_pointclouds.items():
-
             embeddings_vector = embeddings.get(mask_key, None)
+            description = descriptions.get(mask_key, None)
+            label = segmentation_labels.get(mask_key, None)
+            if label != None and description != None:
+                description = label + ": " + description
             if embeddings_vector is not None:
                 embeddings_vector = F.normalize(embeddings_vector, p=2, dim=-1)
             if mask_key in self.id_map:
-                self._update_object(mask_key, self.id_map[mask_key],segmented_pointcloud, embeddings_vector)
+                if self.enable_same_mask_tracking:
+                    self._update_object(mask_key, self.id_map[mask_key],segmented_pointcloud, embeddings_vector, description)
                 continue
 
             centroid = segmented_pointcloud.mean(axis=0)
@@ -183,9 +205,9 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
             obj_id = self._match_object(centroid, aabb, embeddings_vector)
 
             if obj_id is None:
-                self._create_object(mask_key, segmented_pointcloud, centroid, embeddings_vector, descriptions.get(mask_key, None))
+                self._create_object(mask_key, segmented_pointcloud, centroid, embeddings_vector, description)
             else:
-                self._update_object(mask_key, obj_id,segmented_pointcloud, embeddings_vector)
+                self._update_object(mask_key, obj_id,segmented_pointcloud, embeddings_vector, description)
                 updated_objects.append(obj_id)
 
         # check if the object if the updated object can be fused with another object
@@ -260,18 +282,19 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
                         points = segmented_pointcloud,
                         embedding = embeddings_vector,
                         description= description,
-                        running_embedding_weight = self.running_embedding_weight
+                        running_embedding_weight = self.running_embedding_weight,
+                        track_points = self.track_points
                         )
         self.objects_map[obj_id] = obj
         self.rtree.insert(obj_id, obj.aabb)
 
 
-    def _update_object(self, mask_id, obj_id, new_points, new_embedding):
+    def _update_object(self, mask_id, obj_id, new_points, new_embedding, description = None):
         self.id_map[mask_id] = obj_id
         obj = self.objects_map[obj_id]
 
         self.rtree.delete(obj_id, obj.aabb)
-        obj.update(mask_id,new_points,new_embedding)
+        obj.update(mask_id,new_points,new_embedding, description)
         self.rtree.insert(obj_id, obj.aabb)
 
     def fuse_objects(self, obj_id_1, obj_id_2):
@@ -292,7 +315,6 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
             case 6:
                 return tuple(region)
             case _:
-                print()
                 raise ValueError("Wrong dimensions",region.shape)
 
     def query_objects(self, region, mode = "KNN"):
@@ -300,7 +322,6 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
         bbox = self.region_pre_step(region)
         match mode:
             case "KNN":
-                print(bbox)
                 return list(self.rtree.nearest(bbox, self.knn_count))
             case "intersection":
                 return list(self.rtree.intersection(bbox))
