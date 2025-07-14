@@ -23,6 +23,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         save_floor_data: Whether to save floor detection results (default: True)
         save_closest_points: Whether to save closest point analysis (default: True)
         save_object_mapping: Whether to save object mapping (default: True)
+        save_yolo_detections: Whether to save YOLO object detection results (default: True)
         save_intermediate: Whether to save intermediate results every N frames (default: False)
         intermediate_interval: Save interval for intermediate results (default: 10)
         create_timestamped_dir: Whether to create timestamped subdirectory (default: True)
@@ -43,6 +44,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                  save_floor_data: bool = True,
                  save_closest_points: bool = True,
                  save_object_mapping: bool = True,
+                 save_yolo_detections: bool = True,
                  save_intermediate: bool = False,
                  intermediate_interval: int = 10,
                  create_timestamped_dir: bool = True,
@@ -54,6 +56,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.save_floor_data = save_floor_data
         self.save_closest_points = save_closest_points
         self.save_object_mapping = save_object_mapping
+        self.save_yolo_detections = save_yolo_detections
         self.save_intermediate = save_intermediate
         self.intermediate_interval = intermediate_interval
         self.create_timestamped_dir = create_timestamped_dir
@@ -69,6 +72,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.accumulated_n_closest_points_3d = []  # Now stores arrays of n points
         self.accumulated_n_closest_points_indices = []  # Now stores arrays of n indices
         self.accumulated_n_closest_points_distances = []  # Now stores arrays of n distances
+        self.accumulated_yolo_detections = []  # Store YOLO detections per frame
+        self.accumulated_segmentation_labels = []  # Store segmentation labels per frame
         self.floor_data = None
         self.final_point_cloud = None
         self.object_mapping = None
@@ -95,7 +100,11 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             ])
         if self.save_object_mapping:
             inputs.extend(["objects", "object_dict"])
-        # Floor data and closest points are optional and will be handled via optional_inputs
+        if self.save_yolo_detections:
+            inputs.append("yolo_detections")
+        # Always try to get segmentation labels if available
+        inputs.append("segmentation_labels")
+        # Floor data, closest points, YOLO detections, and segmentation labels are optional and will be handled via optional_inputs
             
         return inputs
     
@@ -128,6 +137,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
              floor_normal=None, floor_offset=None,
              n_closest_points_3d=None, n_closest_points_index=None, n_closest_points_distance_2d=None,
              objects=None, object_dict=None,
+             yolo_detections=None, segmentation_labels=None,
              **kwargs: Any) -> Dict[str, Any]:
         """
         Accumulate SLAM analysis data and save according to configuration.
@@ -144,6 +154,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             n_closest_points_distance_2d: Current 3D distance to closest point
             objects: Current frame objects
             object_dict: Object3D mapping dictionary
+            yolo_detections: YOLO object detection results
+            segmentation_labels: Mapping of segment IDs to class labels
             **kwargs: Additional arguments
             
         Returns:
@@ -182,6 +194,24 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 else:
                     self.accumulated_n_closest_points_indices.append(None)
         
+        # Accumulate YOLO detection data
+        if self.save_yolo_detections:
+            yolo_data = {
+                "step_nr": step_nr,
+                "timestamp": float(timestamp) if timestamp is not None else None,
+                "detections": yolo_detections if yolo_detections is not None else {}
+            }
+            self.accumulated_yolo_detections.append(yolo_data)
+        
+        # Accumulate segmentation labels data (always save if available)
+        if segmentation_labels is not None and segmentation_labels:
+            labels_data = {
+                "step_nr": step_nr,
+                "timestamp": float(timestamp) if timestamp is not None else None,
+                "segmentation_labels": segmentation_labels
+            }
+            self.accumulated_segmentation_labels.append(labels_data)
+        
         # Store the latest point cloud
         if self.save_point_cloud and point_cloud is not None:
             self.final_point_cloud = point_cloud
@@ -214,6 +244,14 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         if self.save_object_mapping and self.object_mapping is not None:
             object_path = self._save_object_mapping_data()
             results["object_mapping_path"] = str(object_path)
+        
+        if self.save_yolo_detections and len(self.accumulated_yolo_detections) > 0:
+            yolo_path = self._save_yolo_detections()
+            results["yolo_detections_path"] = str(yolo_path)
+        
+        if len(self.accumulated_segmentation_labels) > 0:
+            labels_path = self._save_segmentation_labels()
+            results["segmentation_labels_path"] = str(labels_path)
         
         # Save metadata
         self._save_metadata(results, step_nr)
@@ -475,6 +513,130 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         print(f"Saving object mapping with {len(self.object_mapping)} objects to: {object_path}")
         return object_path
     
+    def _save_yolo_detections(self) -> pathlib.Path:
+        """Save YOLO detection data."""
+        if self.analysis_format == 'json':
+            yolo_path = self.final_output_dir / f"{self.output_name}_yolo_detections.json"
+            
+            # Create summary statistics
+            total_detections = 0
+            class_counts = {}
+            frames_with_detections = 0
+            
+            for frame_data in self.accumulated_yolo_detections:
+                detections = frame_data.get("detections", {})
+                if detections:
+                    frames_with_detections += 1
+                    for class_name, objects in detections.items():
+                        total_detections += len(objects)
+                        class_counts[class_name] = class_counts.get(class_name, 0) + len(objects)
+            
+            data = {
+                "summary": {
+                    "total_frames": len(self.accumulated_yolo_detections),
+                    "frames_with_detections": frames_with_detections,
+                    "total_detections": total_detections,
+                    "unique_classes": len(class_counts),
+                    "class_counts": class_counts
+                },
+                "detections_by_frame": self.accumulated_yolo_detections
+            }
+            
+            with open(yolo_path, 'w') as f:
+                json.dump(data, f, indent=2)
+                
+        else:  # csv
+            yolo_path = self.final_output_dir / f"{self.output_name}_yolo_detections.csv"
+            with open(yolo_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['step_nr', 'timestamp', 'class_name', 'bbox_x1', 'bbox_y1', 
+                               'bbox_x2', 'bbox_y2', 'confidence', 'class_id', 'detection_id'])
+                
+                for frame_data in self.accumulated_yolo_detections:
+                    step_nr = frame_data["step_nr"]
+                    timestamp = frame_data["timestamp"]
+                    detections = frame_data.get("detections", {})
+                    
+                    if not detections:
+                        # Write a row with no detections
+                        writer.writerow([step_nr, timestamp, '', '', '', '', '', '', '', ''])
+                    else:
+                        for class_name, objects in detections.items():
+                            for obj in objects:
+                                bbox = obj.get("bbox", [0, 0, 0, 0])
+                                row = [
+                                    step_nr, timestamp, class_name,
+                                    bbox[0], bbox[1], bbox[2], bbox[3],
+                                    obj.get("confidence", 0.0),
+                                    obj.get("class_id", -1),
+                                    obj.get("detection_id", -1)
+                                ]
+                                writer.writerow(row)
+        
+        return yolo_path
+    
+    def _save_segmentation_labels(self) -> pathlib.Path:
+        """Save segmentation labels data linking segment IDs to class names."""
+        if self.analysis_format == 'json':
+            labels_path = self.final_output_dir / f"{self.output_name}_segmentation_labels.json"
+            
+            # Create comprehensive segmentation labels data
+            all_classes = set()
+            frames_with_labels = 0
+            total_segments = 0
+            
+            for frame_data in self.accumulated_segmentation_labels:
+                labels = frame_data.get("segmentation_labels", {})
+                if labels:
+                    frames_with_labels += 1
+                    total_segments += len(labels)
+                    all_classes.update(labels.values())
+            
+            data = {
+                "summary": {
+                    "total_frames": len(self.accumulated_segmentation_labels),
+                    "frames_with_labels": frames_with_labels,
+                    "total_segments": total_segments,
+                    "unique_classes": sorted(list(all_classes)),
+                    "class_distribution": self._calculate_class_distribution()
+                },
+                "labels_by_frame": self.accumulated_segmentation_labels
+            }
+            
+            with open(labels_path, 'w') as f:
+                json.dump(data, f, indent=2)
+                
+        else:  # csv
+            labels_path = self.final_output_dir / f"{self.output_name}_segmentation_labels.csv"
+            with open(labels_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['step_nr', 'timestamp', 'segment_id', 'class_label'])
+                
+                for frame_data in self.accumulated_segmentation_labels:
+                    step_nr = frame_data["step_nr"]
+                    timestamp = frame_data["timestamp"]
+                    labels = frame_data.get("segmentation_labels", {})
+                    
+                    if not labels:
+                        # Write a row indicating no labels for this frame
+                        writer.writerow([step_nr, timestamp, '', ''])
+                    else:
+                        for segment_id, class_label in labels.items():
+                            writer.writerow([step_nr, timestamp, segment_id, class_label])
+        
+        return labels_path
+    
+    def _calculate_class_distribution(self) -> Dict[str, int]:
+        """Calculate the distribution of classes across all frames."""
+        class_counts = {}
+        
+        for frame_data in self.accumulated_segmentation_labels:
+            labels = frame_data.get("segmentation_labels", {})
+            for class_label in labels.values():
+                class_counts[class_label] = class_counts.get(class_label, 0) + 1
+        
+        return class_counts
+    
     def _save_intermediate_results(self, step_nr: int) -> None:
         """Save intermediate results for this step."""
         intermediate_dir = self.final_output_dir / "intermediate" / f"step_{step_nr:06d}"
@@ -611,6 +773,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "save_floor_data": self.save_floor_data,
                 "save_closest_points": self.save_closest_points,
                 "save_object_mapping": self.save_object_mapping,
+                "save_yolo_detections": self.save_yolo_detections,
                 "save_intermediate": self.save_intermediate,
                 "intermediate_interval": self.intermediate_interval,
                 "analysis_format": self.analysis_format,
@@ -621,6 +784,9 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "total_poses": len(self.accumulated_timestamps),
                 "trajectory_duration": (max(self.accumulated_timestamps) - min(self.accumulated_timestamps)) if len(self.accumulated_timestamps) > 1 else 0,
                 "has_floor_data": self.floor_data is not None,
+                "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
+                "yolo_detections_count": len(self.accumulated_yolo_detections),
+                "segmentation_labels_count": len(self.accumulated_segmentation_labels)
                 "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
                 "has_object_mapping": self.object_mapping is not None,
                 "total_objects": len(self.object_mapping) if self.object_mapping is not None else 0
@@ -638,6 +804,12 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "max_n_closest_points_distance_2d": self._calculate_distance_stats("max"),
                 "std_n_closest_points_distance_2d": self._calculate_distance_stats("std")
             }
+        
+        if len(self.accumulated_yolo_detections) > 0:
+            metadata["yolo_analysis"] = self._calculate_yolo_stats()
+        
+        if len(self.accumulated_segmentation_labels) > 0:
+            metadata["segmentation_analysis"] = self._calculate_segmentation_stats()
         
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2) 
@@ -705,3 +877,87 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         elif stat == "std":
             return float(np.std(distances_array))
         return None 
+    
+    def _calculate_yolo_stats(self) -> Dict[str, Any]:
+        """Calculate statistics from YOLO detection data."""
+        total_detections = 0
+        class_counts = {}
+        frames_with_detections = 0
+        confidence_scores = []
+        detections_per_frame = []
+        
+        for frame_data in self.accumulated_yolo_detections:
+            detections = frame_data.get("detections", {})
+            frame_detection_count = 0
+            
+            if detections:
+                frames_with_detections += 1
+                for class_name, objects in detections.items():
+                    object_count = len(objects)
+                    total_detections += object_count
+                    frame_detection_count += object_count
+                    class_counts[class_name] = class_counts.get(class_name, 0) + object_count
+                    
+                    # Collect confidence scores
+                    for obj in objects:
+                        if "confidence" in obj:
+                            confidence_scores.append(obj["confidence"])
+            
+            detections_per_frame.append(frame_detection_count)
+        
+        stats = {
+            "total_frames": len(self.accumulated_yolo_detections),
+            "frames_with_detections": frames_with_detections,
+            "detection_rate": frames_with_detections / len(self.accumulated_yolo_detections) if self.accumulated_yolo_detections else 0,
+            "total_detections": total_detections,
+            "avg_detections_per_frame": np.mean(detections_per_frame) if detections_per_frame else 0,
+            "max_detections_per_frame": max(detections_per_frame) if detections_per_frame else 0,
+            "unique_classes": len(class_counts),
+            "class_counts": class_counts
+        }
+        
+        if confidence_scores:
+            stats["confidence_stats"] = {
+                "mean_confidence": float(np.mean(confidence_scores)),
+                "min_confidence": float(np.min(confidence_scores)),
+                "max_confidence": float(np.max(confidence_scores)),
+                "std_confidence": float(np.std(confidence_scores))
+            }
+        
+        return stats
+    
+    def _calculate_segmentation_stats(self) -> Dict[str, Any]:
+        """Calculate statistics from segmentation labels data."""
+        total_segments = 0
+        frames_with_labels = 0
+        class_counts = {}
+        segments_per_frame = []
+        all_classes = set()
+        
+        for frame_data in self.accumulated_segmentation_labels:
+            labels = frame_data.get("segmentation_labels", {})
+            frame_segment_count = len(labels)
+            
+            if frame_segment_count > 0:
+                frames_with_labels += 1
+                total_segments += frame_segment_count
+                segments_per_frame.append(frame_segment_count)
+                
+                for class_label in labels.values():
+                    class_counts[class_label] = class_counts.get(class_label, 0) + 1
+                    all_classes.add(class_label)
+        
+        stats = {
+            "total_frames": len(self.accumulated_segmentation_labels),
+            "frames_with_labels": frames_with_labels,
+            "labeling_rate": frames_with_labels / len(self.accumulated_segmentation_labels) if self.accumulated_segmentation_labels else 0,
+            "total_segments": total_segments,
+            "avg_segments_per_frame": np.mean(segments_per_frame) if segments_per_frame else 0,
+            "max_segments_per_frame": max(segments_per_frame) if segments_per_frame else 0,
+            "min_segments_per_frame": min(segments_per_frame) if segments_per_frame else 0,
+            "unique_classes": len(all_classes),
+            "class_list": sorted(list(all_classes)),
+            "class_distribution": class_counts
+        }
+        
+        return stats

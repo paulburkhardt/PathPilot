@@ -24,6 +24,7 @@ data/*
 *.txt
 *.csv
 enhanced_slam_outputs/
+*.json
 
 
 sam2/

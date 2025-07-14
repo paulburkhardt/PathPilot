@@ -11,6 +11,7 @@ from .pipeline_components.data_segmenters.point_cloud_filter_segmenter import Po
 from .pipeline_components.object_databases.bbox_object_database import BBoxObjectDatabase
 from .pipeline_components.data_segmenters.image_embedding_segmenter import ImageEmbeddingSegmenter
 
+from .pipeline_components.data_segmenters.yolo_segmenter import YOLOSegmenter
 
 class PipelineBuilder:
     """
@@ -34,6 +35,7 @@ class PipelineBuilder:
         "IncrementalClosestPointFinderComponent": IncrementalClosestPointFinderComponent,
         "IncrementalFloorDetectionComponent": IncrementalFloorDetectionComponent,
         "ImageDataSegmenter": ImageDataSegmenter,
+        "YOLOSegmenter": YOLOSegmenter,
         "PointCloudFilterSegmenter": PointCloudFilterSegmenter,
         "BBoxObjectDatabase": BBoxObjectDatabase,
         "ImageEmbeddingSegmenter": ImageEmbeddingSegmenter
