@@ -80,5 +80,37 @@
             ],
             "justMyCode": false
         },
+        {
+            "name": "Python Debugger: Generate warning video",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/generate_warning_video.py",
+            "console": "integratedTerminal",
+            "args": [
+                "Data/Videos/two_chairs_and_trash.mp4",
+                "enhanced_slam_outputs/run_44/incremental_analysis_detailed_20250714_115932/incremental_analysis_detailed_objects.csv",
+                "enhanced_slam_outputs/run_44/incremental_analysis_detailed_20250714_115932/incremental_analysis_detailed_trajectory.txt",
+                "outputs/warning_video.mp4",
+                "-d",
+                "10.0",
+                "--warning-cooldown",
+                "1000",
+                "--frame-subsample",
+                "2"
+            ],
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: user demo",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/user_demo.py",
+            "console": "integratedTerminal",
+            "args": [
+                "Data/Videos/two_chairs_and_trash.mp4",
+                "enhanced_slam_outputs/run_44/incremental_analysis_detailed_20250714_115932",
+            ],
+            "justMyCode": false
+        },
     ]
 }
