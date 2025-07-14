@@ -51,6 +51,14 @@ pip install open3d
 python visualize_slam_output.py /path/to/slam_analysis_output_dir
 ```
 
+### Full Usage
+```bash
+python visualize_slam_output.py --color_pointcloud_by_classIds --show_segmentation_masks_separately --show-yolo-detections /path/to/slam_analysis_output_dir
+```
+
+
+
+
 ### Command Line Options
 
 #### Visualization Toggles

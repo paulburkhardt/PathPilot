@@ -406,7 +406,93 @@ class SLAMOutputVisualizer:
             print("No floor data file found")
     
     def _load_closest_points(self) -> None:
-        """Load closest points analysis data."""
+        """Load closest points or closest objects analysis data."""
+        # Check user preference
+        prefer_points = self.config.get('prefer_closest_points', False)
+        
+        if prefer_points:
+            print("User preference: closest points over closest objects")
+            self._load_traditional_closest_points()
+            return
+        
+        # First try to load closest objects (with segment IDs) - this is the preferred format
+        closest_objects_files = [
+            self.output_dir / "slam_analysis_closest_objects.csv",
+            self.output_dir / "incremental_analysis_detailed_closest_objects.csv"
+        ]
+        
+        for closest_objects_file in closest_objects_files:
+            if closest_objects_file.exists():
+                try:
+                    print(f"Loading closest objects data from {closest_objects_file}")
+                    df = pd.read_csv(closest_objects_file)
+                    
+                    # Validate required columns for closest objects
+                    required_columns = ['step', 'closest_3d_x', 'closest_3d_y', 'closest_3d_z', 'closest_2d_distance', 'segment_id']
+                    missing_columns = [col for col in required_columns if col not in df.columns]
+                    if missing_columns:
+                        print(f"Warning: Missing columns in closest objects CSV: {missing_columns}")
+                        continue
+                    
+                    # Group by step and aggregate closest objects data
+                    objects_by_step = {}
+                    for _, row in df.iterrows():
+                        step = int(row['step'])
+                        if step not in objects_by_step:
+                            objects_by_step[step] = {
+                                'points': [],
+                                'distances': [],
+                                'segment_ids': []
+                            }
+                        
+                        point = [row['closest_3d_x'], row['closest_3d_y'], row['closest_3d_z']]
+                        distance = row['closest_2d_distance']
+                        segment_id = int(row['segment_id'])
+                        
+                        objects_by_step[step]['points'].append(point)
+                        objects_by_step[step]['distances'].append(distance)
+                        objects_by_step[step]['segment_ids'].append(segment_id)
+                    
+                    # Convert to arrays for visualization compatibility
+                    points_3d = []
+                    distances = []
+                    segment_ids = []
+                    steps = []
+                    
+                    for step in sorted(objects_by_step.keys()):
+                        step_data = objects_by_step[step]
+                        points_3d.append(step_data['points'])
+                        distances.append(step_data['distances'])
+                        segment_ids.append(step_data['segment_ids'])
+                        steps.append(step)
+                    
+                    self.data['closest_points'] = {
+                        'points_3d': np.array(points_3d, dtype=object),
+                        'distances': np.array(distances, dtype=object),
+                        'segment_ids': np.array(segment_ids, dtype=object),  # New: segment IDs
+                        'steps': np.array(steps),
+                        'data_type': 'objects',  # New: mark as objects data
+                        'summary': {
+                            'total_steps': len(steps),
+                            'unique_segments': len(set([sid for step_sids in segment_ids for sid in step_sids])),
+                            'segments_per_step': {step: len(set(step_data['segment_ids'])) for step, step_data in objects_by_step.items()}
+                        }
+                    }
+                    
+                    print(f"Loaded closest objects data: {len(df)} entries across {len(steps)} steps")
+                    print(f"Unique segment IDs: {sorted(set([sid for step_sids in segment_ids for sid in step_sids]))}")
+                    return
+                    
+                except Exception as e:
+                    print(f"Failed to load closest objects data from {closest_objects_file}: {e}")
+                    continue
+        
+        # Fallback: Try to load traditional closest points data
+        print("No closest objects data found, trying closest points data...")
+        self._load_traditional_closest_points()
+    
+    def _load_traditional_closest_points(self) -> None:
+        """Load traditional closest points data."""
         # Try JSON first, then CSV with multiple possible filenames
         closest_files = [
             self.output_dir / "slam_analysis_closest_points.json",
@@ -425,6 +511,7 @@ class SLAMOutputVisualizer:
                             'points_3d': np.array(closest_data['n_closest_points_3d']),
                             'indices': np.array(closest_data['n_closest_points_indices']),
                             'distances': np.array(closest_data['n_closest_points_distances']),
+                            'data_type': 'points',  # Mark as traditional points data
                             'summary': closest_data.get('analysis_summary', {})
                         }
                     else:  # CSV
@@ -461,6 +548,7 @@ class SLAMOutputVisualizer:
                                 'points_3d': np.array(points_3d, dtype=object),
                                 'distances': np.array(distances, dtype=object),
                                 'steps': np.array(steps),  # Store step indices for mapping
+                                'data_type': 'points',  # Mark as traditional points data
                                 'summary': {}
                             }
                     print(f"Loaded closest points data from {closest_file}")
@@ -517,6 +605,9 @@ class SLAMOutputVisualizer:
             print(f"Video ready for visualization: {video_file}")
         except Exception as e:
             print(f"Failed to load video data: {e}")
+            # Remove video from data so we don't try to use it later
+            if 'video' in self.data:
+                del self.data['video']
 
     def _get_video_path_from_config(self) -> Optional[str]:
         """Extract video path from pipeline configuration."""
@@ -874,74 +965,112 @@ class SLAMOutputVisualizer:
         
     
     def _prepare_closest_points_data(self, num_poses: int) -> Dict[str, np.ndarray]:
-        """Prepare closest points data for visualization."""
+        """Prepare closest points/objects data for visualization."""
         closest_data = self.data['closest_points']
+        data_type = closest_data.get('data_type', 'points')
+        
+        print(f"Preparing visualization data for {data_type} (type: {data_type})")
         
         # Handle different data formats
         if 'points_3d' in closest_data:
             points_3d = closest_data['points_3d']
             distances = closest_data['distances']
             steps = closest_data.get('steps', None)
+            segment_ids = closest_data.get('segment_ids', None)  # New: segment IDs
             
             # If we have step information, map data to trajectory poses
             if steps is not None:
-                print(f"Mapping {len(steps)} closest point entries to {num_poses} trajectory poses using step indices")
+                print(f"Mapping {len(steps)} {data_type} entries to {num_poses} trajectory poses using step indices")
                 
                 # Create arrays for all poses, filled with None initially
                 mapped_points = [None] * num_poses
                 mapped_distances = [None] * num_poses
+                mapped_segment_ids = [None] * num_poses  # New: segment IDs mapping
                 
                 # Map data based on step indices
                 for i, step in enumerate(steps):
                     if step < num_poses and len(points_3d[i]) > 0:
-                        mapped_points[step] = points_3d[i][0]  # First closest point
+                        mapped_points[step] = points_3d[i][0]  # First closest point/object
                         mapped_distances[step] = distances[i][0]  # First distance
+                        
+                        # Map segment IDs if available
+                        if segment_ids is not None and len(segment_ids[i]) > 0:
+                            mapped_segment_ids[step] = segment_ids[i][0]  # First segment ID
                 
                 # Fill missing data with None or default values
                 final_points = []
                 final_distances = []
+                final_segment_ids = []
+                valid_mask = []
                 
                 for i in range(num_poses):
                     if mapped_points[i] is not None:
                         final_points.append(mapped_points[i])
                         final_distances.append(mapped_distances[i])
+                        final_segment_ids.append(mapped_segment_ids[i])
+                        valid_mask.append(True)
                     else:
                         # Use trajectory position as fallback for missing data
                         final_points.append(self.data['trajectory']['positions'][i])
                         final_distances.append(0.0)
+                        final_segment_ids.append(-1)  # -1 indicates no segment data
+                        valid_mask.append(False)
                 
-                return {
+                result = {
                     'points': np.array(final_points),
                     'distances': np.array(final_distances),
-                    'valid_mask': np.array([mapped_points[i] is not None for i in range(num_poses)])
+                    'valid_mask': np.array(valid_mask),
+                    'data_type': data_type
                 }
+                
+                # Add segment IDs if available
+                if data_type == 'objects':
+                    result['segment_ids'] = np.array(final_segment_ids)
+                    print(f"Mapped segment IDs available for visualization")
+                
+                return result
             
             else:
                 # Fallback to old behavior if no step information
                 if len(points_3d) != num_poses:
-                    print(f"Warning: Closest points data length ({len(points_3d)}) doesn't match trajectory length ({num_poses})")
+                    print(f"Warning: {data_type} data length ({len(points_3d)}) doesn't match trajectory length ({num_poses})")
                     # Take the minimum length
                     min_len = min(len(points_3d), num_poses)
                     points_3d = points_3d[:min_len]
                     distances = distances[:min_len]
+                    if segment_ids is not None:
+                        segment_ids = segment_ids[:min_len]
                 
-                # Extract first closest point and distance for each pose
+                # Extract first closest point/object and distance for each pose
                 first_closest_points = []
                 first_distances = []
+                first_segment_ids = []
                 
                 for i in range(len(points_3d)):
                     if len(points_3d[i]) > 0:
                         first_closest_points.append(points_3d[i][0])
                         first_distances.append(distances[i][0])
+                        if segment_ids is not None and len(segment_ids[i]) > 0:
+                            first_segment_ids.append(segment_ids[i][0])
+                        else:
+                            first_segment_ids.append(-1)
                     else:
                         # Use trajectory position as fallback
                         first_closest_points.append(self.data['trajectory']['positions'][i])
                         first_distances.append(0.0)
+                        first_segment_ids.append(-1)
                 
-                return {
+                result = {
                     'points': np.array(first_closest_points),
-                    'distances': np.array(first_distances)
+                    'distances': np.array(first_distances),
+                    'data_type': data_type
                 }
+                
+                # Add segment IDs if this is objects data
+                if data_type == 'objects':
+                    result['segment_ids'] = np.array(first_segment_ids)
+                
+                return result
         
         return None
     
@@ -1003,6 +1132,12 @@ class SLAMOutputVisualizer:
             if closest_points_data is not None and i < len(closest_points_data['points']):
                 closest_point = closest_points_data['points'][i]
                 distance = closest_points_data['distances'][i]
+                data_type = closest_points_data.get('data_type', 'points')
+                
+                # Get segment ID if available
+                segment_id = None
+                if 'segment_ids' in closest_points_data and i < len(closest_points_data['segment_ids']):
+                    segment_id = closest_points_data['segment_ids'][i]
                 
                 # Check if this pose has valid closest point data
                 has_valid_data = True
@@ -1021,9 +1156,9 @@ class SLAMOutputVisualizer:
                     if self.config['enable_directional_warnings']:
                         direction = self._calculate_direction_to_point(position, quaternion, closest_point)
                     
-                    # Generate warning message
+                    # Generate warning message (now includes segment info)
                     warning_message = self._generate_warning_message(
-                        distance, direction, warning_level
+                        distance, direction, warning_level, data_type, segment_id
                     )
                     
                     # Get warning-appropriate colors and styling
@@ -1031,7 +1166,8 @@ class SLAMOutputVisualizer:
                     warning_radius = self._get_warning_radius(warning_level)
                     
                     # Log closest point with warning-appropriate styling
-                    rr.log("world/closest_point", rr.Points3D(
+                    entity_name = "world/closest_object" if data_type == 'objects' else "world/closest_point"
+                    rr.log(entity_name, rr.Points3D(
                         positions=closest_point.reshape(1, 3),
                         colors=warning_colors,
                         radii=[warning_radius]
@@ -1041,18 +1177,24 @@ class SLAMOutputVisualizer:
                     if self.config['show_distance_lines']:
                         line_colors = warning_colors if warning_level != 'normal' else [255, 255, 0]
                         line_width = 0.008 if warning_level in ['strong', 'critical'] else 0.005
-                        rr.log("world/distance_line", rr.LineStrips3D(
+                        line_entity = "world/distance_line_object" if data_type == 'objects' else "world/distance_line"
+                        rr.log(line_entity, rr.LineStrips3D(
                             strips=[np.array([position, closest_point])],
                             colors=line_colors,
                             radii=[line_width]
                         ))
                     
                     # Log distance plot
-                    rr.log("plots/distance_to_closest", rr.Scalars(scalars=[distance]))
+                    plot_name = "plots/distance_to_closest_object" if data_type == 'objects' else "plots/distance_to_closest"
+                    rr.log(plot_name, rr.Scalars(scalars=[distance]))
                     
                     # Log warning level plot
                     warning_level_numeric = {'normal': 0, 'caution': 1, 'strong': 2, 'critical': 3}
                     rr.log("plots/warning_level", rr.Scalars(scalars=[warning_level_numeric[warning_level]]))
+                    
+                    # Log segment ID plot if available
+                    if segment_id is not None and segment_id >= 0:
+                        rr.log("plots/closest_object_segment_id", rr.Scalars(scalars=[segment_id]))
                     
                     # Log enhanced warning message
                     rr.log("world/distance_text", rr.TextDocument(warning_message))
@@ -1063,8 +1205,11 @@ class SLAMOutputVisualizer:
                 else:
                     # Clear visualizations for poses without valid data
                     rr.log("world/closest_point", rr.Clear(recursive=False))
+                    rr.log("world/closest_object", rr.Clear(recursive=False))
                     rr.log("world/distance_line", rr.Clear(recursive=False))
-                    rr.log("world/distance_text", rr.TextDocument("No closest point data"))
+                    rr.log("world/distance_line_object", rr.Clear(recursive=False))
+                    text_message = f"No closest {data_type} data"
+                    rr.log("world/distance_text", rr.TextDocument(text_message))
             
             # Log view cone if enabled
             if self.config['show_view_cones']:
@@ -1692,13 +1837,25 @@ class SLAMOutputVisualizer:
 
     
     def _generate_warning_message(self, distance: float, direction: str, 
-                                warning_level: str) -> str:
+                                warning_level: str, data_type: str = 'points', 
+                                segment_id: Optional[int] = None) -> str:
         """Generate appropriate warning message based on context."""
         if not self.config['enable_warnings']:
-            return f"Distance: {distance:.3f}m"
+            if segment_id is not None and segment_id >= 0:
+                return f"Distance: {distance:.3f}m (Segment {segment_id})"
+            else:
+                return f"Distance: {distance:.3f}m"
         
         # Format distance
         distance_str = f"{distance:.2f}m"
+        
+        # Create object/point descriptor
+        if data_type == 'objects' and segment_id is not None and segment_id >= 0:
+            object_descriptor = f"Object #{segment_id}"
+        elif data_type == 'objects':
+            object_descriptor = "Object"
+        else:
+            object_descriptor = "Point"
         
         # Base message components
         warning_prefixes = {
@@ -1713,21 +1870,27 @@ class SLAMOutputVisualizer:
         
         if warning_level == 'normal':
             if self.config['enable_directional_warnings'] and direction:
-                return f"Distance: {distance_str} ({direction})"
+                if segment_id is not None and segment_id >= 0:
+                    return f"Distance: {distance_str} ({direction}) - {object_descriptor}"
+                else:
+                    return f"Distance: {distance_str} ({direction})"
             else:
-                return f"Distance: {distance_str}"
+                if segment_id is not None and segment_id >= 0:
+                    return f"Distance: {distance_str} - {object_descriptor}"
+                else:
+                    return f"Distance: {distance_str}"
         
         # Warning messages
         if self.config['enable_directional_warnings'] and direction:
             if warning_level == 'critical':
-                return f"{prefix}Object {distance_str} {direction}!"
+                return f"{prefix}{object_descriptor} {distance_str} {direction}!"
             else:
-                return f"{prefix}Object {distance_str} {direction}"
+                return f"{prefix}{object_descriptor} {distance_str} {direction}"
         else:
             if warning_level == 'critical':
-                return f"{prefix}Object at {distance_str}!"
+                return f"{prefix}{object_descriptor} at {distance_str}!"
             else:
-                return f"{prefix}Object at {distance_str}"
+                return f"{prefix}{object_descriptor} at {distance_str}"
     
     def _get_warning_colors(self, warning_level: str) -> Tuple[int, int, int]:
         """Get color scheme for warning level."""
@@ -1837,8 +2000,14 @@ Examples:
     python visualize_slam_output.py ./outputs --no-directional-warnings
     python visualize_slam_output.py ./outputs --show-yolo-detections --yolo-confidence-threshold 0.5
     python visualize_slam_output.py ./outputs --show-yolo-detections --no-video
+    python visualize_slam_output.py ./outputs --prefer-closest-points
     
 Note: 
+- **Closest Objects vs Points**: The script automatically detects and prefers closest objects data (with segment IDs) 
+  over traditional closest points when available. Objects data provides richer information about which specific 
+  segmented object is closest. Use --prefer-closest-points to force using traditional closest points data.
+- **Segment ID Visualization**: When closest objects data is available, segment IDs are displayed in warning 
+  messages and logged as a separate plot (plots/closest_object_segment_id).
 - View cone settings will be automatically configured from pipeline metadata if available.
 - Point cloud subsampling uses percentage-based reduction to maintain consistent density across steps.
 - The final temporal step always shows 100% of points, earlier steps show the specified percentage.
@@ -1872,6 +2041,8 @@ Note:
                        help='Disable floor plane visualization')
     parser.add_argument('--no-closest-points', action='store_true',
                        help='Disable closest points analysis visualization')
+    parser.add_argument('--prefer-closest-points', action='store_true',
+                       help='Prefer closest points over closest objects when both are available')
     parser.add_argument('--no-view-cones', action='store_true',
                        help='Disable view cone visualization')
     parser.add_argument('--no-trajectory-path', action='store_true',
@@ -1966,7 +2137,8 @@ def main():
         'enable_directional_warnings': not args.no_directional_warnings,
         'warning_distance_critical': args.warning_distance_critical,
         'warning_distance_strong': args.warning_distance_strong,
-        'warning_distance_caution': args.warning_distance_caution
+        'warning_distance_caution': args.warning_distance_caution,
+        'prefer_closest_points': args.prefer_closest_points
     }
     
     try:
