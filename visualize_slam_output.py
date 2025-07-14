@@ -14,6 +14,7 @@ import argparse
 import json
 import sys
 import numpy as np
+import pandas as pd
 import rerun as rr
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
@@ -38,6 +39,13 @@ class SLAMOutputVisualizer:
         self.config = config
         self.data = {}
         
+        # Warning system state tracking
+        self.warning_state = {
+            'previous_distance': None,
+            'previous_warning_level': 'normal',
+            'frame_count': 0
+        }
+        
         # Validate output directory
         if not self.output_dir.exists():
             raise ValueError(f"Output directory does not exist: {output_dir}")
@@ -61,6 +69,12 @@ class SLAMOutputVisualizer:
         
         if self.config['show_closest_points']:
             self._load_closest_points()
+    
+        if self.config['show_video']:
+            self._load_video_data()
+            
+        if self.config['show_yolo_detections']:
+            self._load_yolo_detections()
     
     def _load_metadata(self) -> None:
         """Load metadata.json if available."""
@@ -456,6 +470,130 @@ class SLAMOutputVisualizer:
         else:
             print("No closest points data file found")
     
+    def _load_video_data(self) -> None:
+        """Load video data from pipeline configuration."""
+        # Extract video path from pipeline configuration
+        video_path = self._get_video_path_from_config()
+        
+        if not video_path:
+            print("No video path found in pipeline configuration")
+            return
+        
+        # Make path relative to the script's location if it's not absolute
+        if not Path(video_path).is_absolute():
+            # Try relative to current working directory first
+            video_file = Path(video_path)
+            if not video_file.exists():
+                # Try relative to the output directory
+                video_file = self.output_dir.parent / video_path
+                if not video_file.exists():
+                    # Try relative to the script's directory
+                    script_dir = Path(__file__).parent
+                    video_file = script_dir / video_path
+        else:
+            video_file = Path(video_path)
+        
+        # Check for rerun-compatible version first (converted by separate script)
+        compatible_video_file = video_file.parent / f"{video_file.stem}_rerun_compatible.mp4"
+        
+        if compatible_video_file.exists():
+            print(f"Found rerun-compatible video: {compatible_video_file}")
+            video_file = compatible_video_file
+        elif video_file.exists():
+            print(f"Using original video: {video_file}")
+            print("  Note: If video doesn't play, run: python convert_videos_for_rerun.py Data/Videos/")
+        else:
+            print(f"Warning: Video file not found: {video_file}")
+            if not compatible_video_file.exists():
+                print(f"  Also checked for: {compatible_video_file}")
+            return
+        
+        try:
+            # Store video information for later use in visualization
+            self.data['video'] = {
+                'path': str(video_file),
+                'video_path_config': video_path  # Store original config path for reference
+            }
+            print(f"Video ready for visualization: {video_file}")
+        except Exception as e:
+            print(f"Failed to load video data: {e}")
+
+    def _get_video_path_from_config(self) -> Optional[str]:
+        """Extract video path from pipeline configuration."""
+        if 'pipeline_configuration' not in self.data['metadata']:
+            return None
+        
+        pipeline_config = self.data['metadata']['pipeline_configuration']
+        
+        # Look for MAST3RSLAMVideoDataset component configuration
+        if 'pipeline' in pipeline_config and 'components' in pipeline_config['pipeline']:
+            for component in pipeline_config['pipeline']['components']:
+                if component.get('type') == 'MAST3RSLAMVideoDataset':
+                    component_config = component.get('config', {})
+                    return component_config.get('video_path')
+        
+        return None
+    
+    def _load_yolo_detections(self) -> None:
+        """Load YOLO detection data from CSV file."""
+        # Look for YOLO detections CSV file
+        yolo_files = [
+            self.output_dir / "incremental_analysis_detailed_yolo_detections.csv",
+            self.output_dir / "slam_analysis_yolo_detections.csv",
+            self.output_dir / "yolo_detections.csv"
+        ]
+        
+        for yolo_file in yolo_files:
+            if yolo_file.exists():
+                try:
+                    print(f"Loading YOLO detections from {yolo_file}")
+                    df = pd.read_csv(yolo_file)
+                    
+                    # Validate required columns
+                    required_columns = ['step_nr', 'timestamp', 'class_name', 'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2', 'confidence', 'class_id']
+                    missing_columns = [col for col in required_columns if col not in df.columns]
+                    if missing_columns:
+                        print(f"Warning: Missing columns in YOLO CSV: {missing_columns}")
+                        continue
+                    
+                    # Filter out rows with missing detection data (empty bounding boxes)
+                    df = df.dropna(subset=['class_name', 'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2'])
+                    
+                    # Group detections by step number for easier lookup
+                    detections_by_step = {}
+                    for _, row in df.iterrows():
+                        step_nr = int(row['step_nr'])
+                        if step_nr not in detections_by_step:
+                            detections_by_step[step_nr] = []
+                        
+                        # Convert bounding box from [x1, y1, x2, y2] to [x, y, width, height] for Rerun
+                        x1, y1, x2, y2 = row['bbox_x1'], row['bbox_y1'], row['bbox_x2'], row['bbox_y2']
+                        width = x2 - x1
+                        height = y2 - y1
+                        
+                        detection = {
+                            'class_name': row['class_name'],
+                            'bbox': [x1, y1, width, height],  # Rerun format: [x, y, width, height]
+                            'confidence': row['confidence'],
+                            'class_id': int(row['class_id']),
+                            'detection_id': row.get('detection_id', 0)
+                        }
+                        detections_by_step[step_nr].append(detection)
+                    
+                    self.data['yolo_detections'] = {
+                        'detections_by_step': detections_by_step,
+                        'total_detections': len(df)
+                    }
+                    
+                    print(f"Loaded {len(df)} YOLO detections across {len(detections_by_step)} steps")
+                    return
+                    
+                except Exception as e:
+                    print(f"Failed to load YOLO detections from {yolo_file}: {e}")
+                    continue
+        
+        print("No YOLO detections file found")
+    
     def visualize(self) -> None:
         """Visualize all loaded data in rerun."""
         print("Starting visualization in rerun...")
@@ -478,6 +616,10 @@ class SLAMOutputVisualizer:
                 print(f"Failed to spawn rerun viewer: {e2}")
                 print("Please start rerun viewer manually with: rerun")
                 return
+        
+        # Visualize video first (static)
+        if self.config['show_video'] and 'video' in self.data:
+            self._visualize_video()
         
         # Visualize static data first
         if self.config['show_point_cloud'] and 'point_cloud' in self.data:
@@ -730,8 +872,6 @@ class SLAMOutputVisualizer:
         # Log temporal poses
         self._log_temporal_poses(positions, quaternions, timestamps, closest_points_data)
         
-        # Log summary statistics
-        self._log_trajectory_statistics(positions, timestamps, closest_points_data)
     
     def _prepare_closest_points_data(self, num_poses: int) -> Dict[str, np.ndarray]:
         """Prepare closest points data for visualization."""
@@ -818,10 +958,28 @@ class SLAMOutputVisualizer:
                 temporal_point_clouds['steps'], len(positions)
             )
         
+        # Prepare video frame data if available
+        video_frame_mapping = None
+        if 'video' in self.data:
+            video_frame_mapping = self._map_trajectory_to_video_frames(len(positions))
+        
         for i, (timestamp, position, quaternion) in enumerate(zip(timestamps, positions, quaternions)):
             # Set timeline
             rr.set_time("timestamp", timestamp=timestamp)
             rr.set_time("frame", sequence=i)
+            
+            # Log video frame if available
+            if video_frame_mapping and i < len(video_frame_mapping):
+                video_timestamp_ns = video_frame_mapping[i]
+                if video_timestamp_ns is not None:
+                    rr.log("video/frame", rr.VideoFrameReference(
+                        timestamp=rr.datatypes.VideoTimestamp(timestamp_ns=video_timestamp_ns),
+                        video_reference="video/asset"
+                    ))
+            
+            # Log YOLO bounding boxes if available for this step
+            if self.config['show_yolo_detections'] and 'yolo_detections' in self.data:
+                self._log_yolo_bounding_boxes(i)
             
             # Log temporal point cloud if available for this step
             if temporal_point_clouds and step_to_trajectory_mapping:
@@ -852,28 +1010,56 @@ class SLAMOutputVisualizer:
                     has_valid_data = closest_points_data['valid_mask'][i]
                 
                 if has_valid_data and distance > 0:  # Only show if we have real data
-                    # Log closest point
+                    # Update warning system state
+                    self.warning_state['frame_count'] += 1
+                    
+                    # Calculate warning level
+                    warning_level = self._calculate_warning_level(distance)
+                    
+                    # Calculate direction to closest point
+                    direction = ""
+                    if self.config['enable_directional_warnings']:
+                        direction = self._calculate_direction_to_point(position, quaternion, closest_point)
+                    
+                    # Generate warning message
+                    warning_message = self._generate_warning_message(
+                        distance, direction, warning_level
+                    )
+                    
+                    # Get warning-appropriate colors and styling
+                    warning_colors = self._get_warning_colors(warning_level)
+                    warning_radius = self._get_warning_radius(warning_level)
+                    
+                    # Log closest point with warning-appropriate styling
                     rr.log("world/closest_point", rr.Points3D(
                         positions=closest_point.reshape(1, 3),
-                        colors=[0, 255, 0],  # Green for closest point
-                        radii=[0.025]
+                        colors=warning_colors,
+                        radii=[warning_radius]
                     ))
                     
-                    # Log distance line
+                    # Log distance line with warning colors
                     if self.config['show_distance_lines']:
+                        line_colors = warning_colors if warning_level != 'normal' else [255, 255, 0]
+                        line_width = 0.008 if warning_level in ['strong', 'critical'] else 0.005
                         rr.log("world/distance_line", rr.LineStrips3D(
                             strips=[np.array([position, closest_point])],
-                            colors=[255, 255, 0],  # Yellow line
-                            radii=[0.005]
+                            colors=line_colors,
+                            radii=[line_width]
                         ))
                     
                     # Log distance plot
                     rr.log("plots/distance_to_closest", rr.Scalars(scalars=[distance]))
                     
-                    # Log distance text
-                    rr.log("world/distance_text", rr.TextDocument(
-                        f"Distance to closest: {distance:.3f}m"
-                    ))
+                    # Log warning level plot
+                    warning_level_numeric = {'normal': 0, 'caution': 1, 'strong': 2, 'critical': 3}
+                    rr.log("plots/warning_level", rr.Scalars(scalars=[warning_level_numeric[warning_level]]))
+                    
+                    # Log enhanced warning message
+                    rr.log("world/distance_text", rr.TextDocument(warning_message))
+                    
+                    # Update warning state for next frame
+                    self.warning_state['previous_distance'] = distance
+                    self.warning_state['previous_warning_level'] = warning_level
                 else:
                     # Clear visualizations for poses without valid data
                     rr.log("world/closest_point", rr.Clear(recursive=False))
@@ -1334,28 +1520,303 @@ class SLAMOutputVisualizer:
                 radii=[0.002]
             ))
     
-    def _log_trajectory_statistics(self, positions: np.ndarray, timestamps: np.ndarray,
-                                  closest_points_data: Optional[Dict]) -> None:
-        """Log summary statistics."""
-        print("\n=== TRAJECTORY SUMMARY STATISTICS ===")
-        print(f"Total trajectory duration: {timestamps[-1] - timestamps[0]:.2f} seconds")
-        print(f"Number of poses: {len(timestamps)}")
+    def _log_yolo_bounding_boxes(self, trajectory_index: int) -> None:
+        """Log YOLO bounding boxes for the current trajectory step."""
+        yolo_data = self.data['yolo_detections']
+        detections_by_step = yolo_data['detections_by_step']
         
-        # Log basic statistics
-        rr.log("stats/trajectory_duration", rr.Scalars(scalars=[timestamps[-1] - timestamps[0]]))
-        rr.log("stats/num_poses", rr.Scalars(scalars=[len(positions)]))
+        # Map trajectory index to step number (assuming 1:1 mapping for now)
+        # In the future, this could use a more sophisticated mapping like the point cloud mapping
+        step_nr = trajectory_index
         
-        if closest_points_data is not None:
-            distances = closest_points_data['distances']
-            print(f"Average distance to closest point: {distances.mean():.3f}m")
-            print(f"Minimum distance: {distances.min():.3f}m")
-            print(f"Maximum distance: {distances.max():.3f}m")
-            print(f"Standard deviation: {distances.std():.3f}m")
+        if step_nr in detections_by_step:
+            detections = detections_by_step[step_nr]
             
-            # Log distance statistics
-            rr.log("stats/average_distance", rr.Scalars(scalars=[distances.mean()]))
-            rr.log("stats/min_distance", rr.Scalars(scalars=[distances.min()]))
-            rr.log("stats/max_distance", rr.Scalars(scalars=[distances.max()]))
+            if len(detections) > 0:
+                # Prepare data for Rerun Boxes2D
+                boxes = []
+                labels = []
+                colors = []
+                class_ids = []
+                
+                # Color mapping for different classes
+                class_color_map = {
+                    'Chair': [255, 165, 0],      # Orange
+                    'Window': [0, 191, 255],     # Deep sky blue
+                    'Person': [255, 20, 147],    # Deep pink
+                    'Car': [255, 0, 0],          # Red
+                    'Table': [50, 205, 50],      # Lime green
+                    'Door': [138, 43, 226],      # Blue violet
+                }
+                
+                for detection in detections:
+                    bbox = detection['bbox']  # [x, y, width, height]
+                    class_name = detection['class_name']
+                    confidence = detection['confidence']
+                    class_id = detection['class_id']
+                    
+                    # Only show detections above confidence threshold
+                    if confidence >= self.config.get('yolo_confidence_threshold', 0.3):
+                        boxes.append(bbox)
+                        
+                        # Create label with class name and confidence
+                        label = f"{class_name} ({confidence:.2f})"
+                        labels.append(label)
+                        
+                        # Get color for this class
+                        color = class_color_map.get(class_name, [128, 128, 128])  # Default gray
+                        colors.append(color)
+                        
+                        class_ids.append(class_id)
+                
+                # Log bounding boxes if we have any valid detections
+                if len(boxes) > 0:
+                    boxes_array = np.array(boxes)
+                    
+                    # Convert to half-sizes format that Rerun expects for Boxes2D
+                    # Rerun Boxes2D expects: centers and half_sizes
+                    centers = []
+                    half_sizes = []
+                    
+                    for box in boxes:
+                        x, y, width, height = box
+                        center_x = x + width / 2
+                        center_y = y + height / 2
+                        half_width = width / 2
+                        half_height = height / 2
+                        
+                        centers.append([center_x, center_y])
+                        half_sizes.append([half_width, half_height])
+                    
+                    centers_array = np.array(centers)
+                    half_sizes_array = np.array(half_sizes)
+                    
+                    # Log the bounding boxes
+                    rr.log("video/yolo_detections", rr.Boxes2D(
+                        centers=centers_array,
+                        half_sizes=half_sizes_array,
+                        colors=colors,
+                        labels=labels,
+                        class_ids=class_ids
+                    ))
+                else:
+                    # Clear bounding boxes if no valid detections
+                    rr.log("video/yolo_detections", rr.Clear(recursive=False))
+            else:
+                # Clear bounding boxes if no detections for this step
+                rr.log("video/yolo_detections", rr.Clear(recursive=False))
+        else:
+            # Clear bounding boxes if no data for this step
+            rr.log("video/yolo_detections", rr.Clear(recursive=False))
+    
+    def _calculate_warning_level(self, distance: float) -> str:
+        """Calculate warning level based on distance thresholds."""
+        if distance <= self.config['warning_distance_critical']:
+            return 'critical'
+        elif distance <= self.config['warning_distance_strong']:
+            return 'strong'
+        elif distance <= self.config['warning_distance_caution']:
+            return 'caution'
+        else:
+            return 'normal'
+    
+    def _calculate_direction_to_point(self, camera_position: np.ndarray, camera_quaternion: np.ndarray, 
+                                    closest_point: np.ndarray) -> str:
+        """Calculate direction from camera to closest point in human-readable terms."""
+        # Convert quaternion to rotation matrix (same as in _log_view_cone)
+        qx, qy, qz, qw = camera_quaternion
+        
+        # Normalize quaternion
+        norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
+        if norm > 0:
+            qx, qy, qz, qw = qx/norm, qy/norm, qz/norm, qw/norm
+        
+        # Convert to rotation matrix
+        R = np.array([
+            [1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)],
+            [2*(qx*qy + qz*qw), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw)],
+            [2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx*qx + qy*qy)]
+        ])
+        
+        # Calculate vector from camera to closest point
+        to_point = closest_point - camera_position
+        
+        # Transform to camera coordinate system
+        # Camera coordinates: X=right, Y=up, Z=forward
+        camera_coords = R.T @ to_point
+        
+        # Determine primary direction components
+        x, y, z = camera_coords
+        
+        # Create direction description
+        direction_parts = []
+        
+        # Front/Back (Z-axis)
+        if abs(z) > 0.1:  # Threshold to avoid noise
+            if z > 0:
+                direction_parts.append("ahead")
+            else:
+                direction_parts.append("behind")
+        
+        # Left/Right (X-axis)
+        if abs(x) > 0.1:
+            if x > 0:
+                direction_parts.append("right")
+            else:
+                direction_parts.append("left")
+        
+        # Up/Down (Y-axis)
+        if abs(y) > 0.1:
+            if y > 0:
+                direction_parts.append("below")
+            else:
+                direction_parts.append("above")
+        
+        # Combine directions intelligently
+        if len(direction_parts) == 0:
+            return "directly in front"
+        elif len(direction_parts) == 1:
+            return f"to your {direction_parts[0]}"
+        elif len(direction_parts) == 2:
+            # For two directions, combine them naturally
+            if "ahead" in direction_parts or "behind" in direction_parts:
+                front_back = next((d for d in direction_parts if d in ["ahead", "behind"]), "")
+                other = next((d for d in direction_parts if d not in ["ahead", "behind"]), "")
+                return f"{front_back}-{other}"
+            else:
+                return f"{direction_parts[0]}-{direction_parts[1]}"
+        else:
+            # Three directions - combine all
+            return f"{direction_parts[0]}-{direction_parts[1]}-{direction_parts[2]}"
+    
+
+    
+    def _generate_warning_message(self, distance: float, direction: str, 
+                                warning_level: str) -> str:
+        """Generate appropriate warning message based on context."""
+        if not self.config['enable_warnings']:
+            return f"Distance: {distance:.3f}m"
+        
+        # Format distance
+        distance_str = f"{distance:.2f}m"
+        
+        # Base message components
+        warning_prefixes = {
+            'normal': "",
+            'caution': "⚠️ CAUTION: ",
+            'strong': "⚠️ WARNING: ",
+            'critical': "🚨 CRITICAL: "
+        }
+        
+        # Build message
+        prefix = warning_prefixes[warning_level]
+        
+        if warning_level == 'normal':
+            if self.config['enable_directional_warnings'] and direction:
+                return f"Distance: {distance_str} ({direction})"
+            else:
+                return f"Distance: {distance_str}"
+        
+        # Warning messages
+        if self.config['enable_directional_warnings'] and direction:
+            if warning_level == 'critical':
+                return f"{prefix}Object {distance_str} {direction}!"
+            else:
+                return f"{prefix}Object {distance_str} {direction}"
+        else:
+            if warning_level == 'critical':
+                return f"{prefix}Object at {distance_str}!"
+            else:
+                return f"{prefix}Object at {distance_str}"
+    
+    def _get_warning_colors(self, warning_level: str) -> Tuple[int, int, int]:
+        """Get color scheme for warning level."""
+        warning_colors = {
+            'normal': [0, 255, 0],      # Green
+            'caution': [255, 255, 0],   # Yellow  
+            'strong': [255, 165, 0],    # Orange
+            'critical': [255, 0, 0]     # Red
+        }
+        return warning_colors.get(warning_level, [0, 255, 0])
+    
+    def _get_warning_radius(self, warning_level: str) -> float:
+        """Get point radius based on warning level."""
+        warning_radii = {
+            'normal': 0.025,
+            'caution': 0.035,
+            'strong': 0.045,
+            'critical': 0.055
+        }
+        return warning_radii.get(warning_level, 0.025)
+    
+
+    def _map_trajectory_to_video_frames(self, num_poses: int) -> Optional[List[Optional[int]]]:
+        """Map trajectory steps to video frames using step-based division."""
+        if 'video' not in self.data or 'frame_timestamps' not in self.data['video']:
+            return None
+        
+        video_timestamps_ns = self.data['video']['frame_timestamps']
+        num_video_frames = len(video_timestamps_ns)
+        
+        if num_video_frames == 0:
+            return None
+        
+        print(f"Step-based mapping: {num_poses} trajectory poses to {num_video_frames} video frames")
+        
+        # Calculate the step size for video frames
+        # We want to map the entire trajectory to the entire video
+        if num_poses <= 1:
+            # Special case: only one pose, use first frame
+            return [video_timestamps_ns[0]]
+        
+        # Map trajectory steps evenly across video frames
+        frame_mapping = []
+        
+        for i in range(num_poses):
+            # Calculate progress through trajectory (0.0 to 1.0)
+            progress = i / (num_poses - 1)
+            
+            # Map to video frame index
+            video_frame_idx = int(progress * (num_video_frames - 1))
+            video_frame_idx = min(video_frame_idx, num_video_frames - 1)  # Clamp to valid range
+            
+            # Get the timestamp for this frame
+            frame_timestamp_ns = video_timestamps_ns[video_frame_idx]
+            frame_mapping.append(frame_timestamp_ns)
+        
+        # Log mapping statistics
+        unique_frames = len(set(frame_mapping))
+        print(f"Mapped trajectory steps to {unique_frames} unique video frames")
+        print(f"Video frame step size: {num_video_frames / num_poses:.2f} frames per trajectory step")
+        
+        return frame_mapping
+
+    def _visualize_video(self) -> None:
+        """Visualize the video as a static asset and prepare frame references."""
+        video_path = self.data['video']['path']
+        
+        print(f"Loading video asset: {video_path}")
+        
+        try:
+            # Log video asset (static)
+            video_asset = rr.AssetVideo(path=video_path)
+            rr.log("video/asset", video_asset, static=True)
+            
+            # Store video asset for frame reference generation
+            self.data['video']['asset'] = video_asset
+            self.data['video']['frame_timestamps'] = video_asset.read_frame_timestamps_nanos()
+            
+            print(f"Loaded video with {len(self.data['video']['frame_timestamps'])} frames")
+            
+        except Exception as e:
+            print(f"Failed to load video asset: {e}")
+            # Remove video from data so we don't try to use it later
+            if 'video' in self.data:
+                del self.data['video']
+
+
+
+
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -1366,10 +1827,16 @@ def parse_arguments() -> argparse.Namespace:
         epilog="""
 Examples:
     python visualize_slam_output.py ./enhanced_slam_outputs/slam_analysis_20240115_143045
-    python visualize_slam_output.py ./outputs --no-view-cones --no-floor
+    python visualize_slam_output.py ./outputs --no-view-cones --no-floor --no-video
     python visualize_slam_output.py ./outputs --cone-angle 45 --grid-size 5.0
     python visualize_slam_output.py ./outputs --subsample-percentage 0.8 --voxel-size 0.15
     python visualize_slam_output.py ./outputs --color_pointcloud_by_classIds --show_segmentation_masks_separately
+    python visualize_slam_output.py ./outputs --subsample-percentage 0.8
+    python visualize_slam_output.py ./outputs --warning-distance-critical 0.15 --warning-distance-caution 0.8
+    python visualize_slam_output.py ./outputs --no-warnings
+    python visualize_slam_output.py ./outputs --no-directional-warnings
+    python visualize_slam_output.py ./outputs --show-yolo-detections --yolo-confidence-threshold 0.5
+    python visualize_slam_output.py ./outputs --show-yolo-detections --no-video
     
 Note: 
 - View cone settings will be automatically configured from pipeline metadata if available.
@@ -1378,6 +1845,15 @@ Note:
 - Use --no-subsampling to disable subsampling (may cause memory issues with large temporal datasets).
 - Segmentation masks are now temporal and only show for the current frame when playing back the trajectory.
 - Use --show_segmentation_masks_separately to view each segmentation class as a separate entity in the scene tree.
+- Video synchronization uses step-based mapping: trajectory steps are evenly distributed across video frames.
+- Video will be automatically loaded from pipeline configuration if available.
+- Warning system provides proximity alerts with color-coded visualization and directional guidance.
+- Warning levels: Normal (>0.6m, green), Caution (0.4-0.6m, yellow), Strong (0.2-0.4m, orange), Critical (<0.2m, red).
+- YOLO detection visualization: Use --show-yolo-detections to overlay bounding boxes on video frames.
+- YOLO data is loaded from incremental_analysis_detailed_yolo_detections.csv in the output directory.
+- Bounding boxes are color-coded by class and include confidence scores in labels.
+- Use --yolo-confidence-threshold to filter detections below a certain confidence level.
+
         """
     )
     
@@ -1409,6 +1885,10 @@ Note:
     parser.add_argument("--show_segmentation_masks_separately", action="store_true",
                         help="Show segmentation masks as separate entities per class")
 
+    parser.add_argument('--no-video', action='store_true',
+                       help='Disable video visualization')
+    parser.add_argument('--show-yolo-detections', action='store_true',
+                       help='Enable YOLO bounding box visualization on video frames')
     
     # Visualization parameters
     parser.add_argument('--floor-threshold', type=float, default=0.05,
@@ -1430,6 +1910,26 @@ Note:
     parser.add_argument('--no-subsampling', action='store_true',
                        help='Disable point cloud subsampling (may cause memory issues with large datasets)')
     
+    # Video synchronization parameters  
+    parser.add_argument('--video-sync-tolerance', type=float, default=1.0,
+                       help='(Deprecated - now using step-based sync) Maximum time difference (seconds) to consider trajectory and video frames synchronized')
+    
+    # YOLO detection parameters
+    parser.add_argument('--yolo-confidence-threshold', type=float, default=0.3,
+                       help='Minimum confidence threshold for displaying YOLO detections (0.0-1.0)')
+    
+    # Warning system parameters
+    parser.add_argument('--warning-distance-critical', type=float, default=0.2,
+                       help='Distance threshold for critical warnings (meters)')
+    parser.add_argument('--warning-distance-strong', type=float, default=0.4,
+                       help='Distance threshold for strong warnings (meters)')
+    parser.add_argument('--warning-distance-caution', type=float, default=0.6,
+                       help='Distance threshold for caution warnings (meters)')
+    parser.add_argument('--no-warnings', action='store_true',
+                       help='Disable proximity warning system')
+    parser.add_argument('--no-directional-warnings', action='store_true',
+                       help='Disable directional warnings (show distance only)')
+    
     return parser.parse_args()
 
 
@@ -1447,6 +1947,9 @@ def main():
         'show_trajectory_path': not args.no_trajectory_path,
         'show_distance_lines': not args.no_distance_lines,
         'highlight_floor_points': not args.no_highlight_floor,
+        'show_video': not args.no_video,
+        'show_yolo_detections': args.show_yolo_detections,
+        'yolo_confidence_threshold': args.yolo_confidence_threshold,
         'floor_threshold': args.floor_threshold,
         'grid_size': args.grid_size,
         'view_cone_angle': args.cone_angle,
@@ -1456,7 +1959,14 @@ def main():
         'voxel_size': args.voxel_size,
         'enable_subsampling': not args.no_subsampling,
         "color_pointcloud_by_classIds": args.color_pointcloud_by_classIds,
-        "show_segmentation_masks_separately": args.show_segmentation_masks_separately
+        "show_segmentation_masks_separately": args.show_segmentation_masks_separately,
+        'video_sync_tolerance': args.video_sync_tolerance,
+        # Warning system configuration
+        'enable_warnings': not args.no_warnings,
+        'enable_directional_warnings': not args.no_directional_warnings,
+        'warning_distance_critical': args.warning_distance_critical,
+        'warning_distance_strong': args.warning_distance_strong,
+        'warning_distance_caution': args.warning_distance_caution
     }
     
     try:
