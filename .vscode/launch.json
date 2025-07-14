@@ -108,7 +108,7 @@
             "console": "integratedTerminal",
             "args": [
                 "Data/Videos/two_chairs_and_trash.mp4",
-                "enhanced_slam_outputs/run_44/incremental_analysis_detailed_20250714_115932",
+                "Data/run_44/incremental_analysis_detailed_20250714_115932",
             ],
             "justMyCode": false
         },
