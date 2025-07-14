@@ -14,6 +14,7 @@ import argparse
 import json
 import sys
 import numpy as np
+import pandas as pd
 import rerun as rr
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
@@ -71,6 +72,9 @@ class SLAMOutputVisualizer:
     
         if self.config['show_video']:
             self._load_video_data()
+            
+        if self.config['show_yolo_detections']:
+            self._load_yolo_detections()
     
     def _load_metadata(self) -> None:
         """Load metadata.json if available."""
@@ -530,6 +534,66 @@ class SLAMOutputVisualizer:
         
         return None
     
+    def _load_yolo_detections(self) -> None:
+        """Load YOLO detection data from CSV file."""
+        # Look for YOLO detections CSV file
+        yolo_files = [
+            self.output_dir / "incremental_analysis_detailed_yolo_detections.csv",
+            self.output_dir / "slam_analysis_yolo_detections.csv",
+            self.output_dir / "yolo_detections.csv"
+        ]
+        
+        for yolo_file in yolo_files:
+            if yolo_file.exists():
+                try:
+                    print(f"Loading YOLO detections from {yolo_file}")
+                    df = pd.read_csv(yolo_file)
+                    
+                    # Validate required columns
+                    required_columns = ['step_nr', 'timestamp', 'class_name', 'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2', 'confidence', 'class_id']
+                    missing_columns = [col for col in required_columns if col not in df.columns]
+                    if missing_columns:
+                        print(f"Warning: Missing columns in YOLO CSV: {missing_columns}")
+                        continue
+                    
+                    # Filter out rows with missing detection data (empty bounding boxes)
+                    df = df.dropna(subset=['class_name', 'bbox_x1', 'bbox_y1', 'bbox_x2', 'bbox_y2'])
+                    
+                    # Group detections by step number for easier lookup
+                    detections_by_step = {}
+                    for _, row in df.iterrows():
+                        step_nr = int(row['step_nr'])
+                        if step_nr not in detections_by_step:
+                            detections_by_step[step_nr] = []
+                        
+                        # Convert bounding box from [x1, y1, x2, y2] to [x, y, width, height] for Rerun
+                        x1, y1, x2, y2 = row['bbox_x1'], row['bbox_y1'], row['bbox_x2'], row['bbox_y2']
+                        width = x2 - x1
+                        height = y2 - y1
+                        
+                        detection = {
+                            'class_name': row['class_name'],
+                            'bbox': [x1, y1, width, height],  # Rerun format: [x, y, width, height]
+                            'confidence': row['confidence'],
+                            'class_id': int(row['class_id']),
+                            'detection_id': row.get('detection_id', 0)
+                        }
+                        detections_by_step[step_nr].append(detection)
+                    
+                    self.data['yolo_detections'] = {
+                        'detections_by_step': detections_by_step,
+                        'total_detections': len(df)
+                    }
+                    
+                    print(f"Loaded {len(df)} YOLO detections across {len(detections_by_step)} steps")
+                    return
+                    
+                except Exception as e:
+                    print(f"Failed to load YOLO detections from {yolo_file}: {e}")
+                    continue
+        
+        print("No YOLO detections file found")
+    
     def visualize(self) -> None:
         """Visualize all loaded data in rerun."""
         print("Starting visualization in rerun...")
@@ -912,6 +976,10 @@ class SLAMOutputVisualizer:
                         timestamp=rr.datatypes.VideoTimestamp(timestamp_ns=video_timestamp_ns),
                         video_reference="video/asset"
                     ))
+            
+            # Log YOLO bounding boxes if available for this step
+            if self.config['show_yolo_detections'] and 'yolo_detections' in self.data:
+                self._log_yolo_bounding_boxes(i)
             
             # Log temporal point cloud if available for this step
             if temporal_point_clouds and step_to_trajectory_mapping:
@@ -1452,6 +1520,95 @@ class SLAMOutputVisualizer:
                 radii=[0.002]
             ))
     
+    def _log_yolo_bounding_boxes(self, trajectory_index: int) -> None:
+        """Log YOLO bounding boxes for the current trajectory step."""
+        yolo_data = self.data['yolo_detections']
+        detections_by_step = yolo_data['detections_by_step']
+        
+        # Map trajectory index to step number (assuming 1:1 mapping for now)
+        # In the future, this could use a more sophisticated mapping like the point cloud mapping
+        step_nr = trajectory_index
+        
+        if step_nr in detections_by_step:
+            detections = detections_by_step[step_nr]
+            
+            if len(detections) > 0:
+                # Prepare data for Rerun Boxes2D
+                boxes = []
+                labels = []
+                colors = []
+                class_ids = []
+                
+                # Color mapping for different classes
+                class_color_map = {
+                    'Chair': [255, 165, 0],      # Orange
+                    'Window': [0, 191, 255],     # Deep sky blue
+                    'Person': [255, 20, 147],    # Deep pink
+                    'Car': [255, 0, 0],          # Red
+                    'Table': [50, 205, 50],      # Lime green
+                    'Door': [138, 43, 226],      # Blue violet
+                }
+                
+                for detection in detections:
+                    bbox = detection['bbox']  # [x, y, width, height]
+                    class_name = detection['class_name']
+                    confidence = detection['confidence']
+                    class_id = detection['class_id']
+                    
+                    # Only show detections above confidence threshold
+                    if confidence >= self.config.get('yolo_confidence_threshold', 0.3):
+                        boxes.append(bbox)
+                        
+                        # Create label with class name and confidence
+                        label = f"{class_name} ({confidence:.2f})"
+                        labels.append(label)
+                        
+                        # Get color for this class
+                        color = class_color_map.get(class_name, [128, 128, 128])  # Default gray
+                        colors.append(color)
+                        
+                        class_ids.append(class_id)
+                
+                # Log bounding boxes if we have any valid detections
+                if len(boxes) > 0:
+                    boxes_array = np.array(boxes)
+                    
+                    # Convert to half-sizes format that Rerun expects for Boxes2D
+                    # Rerun Boxes2D expects: centers and half_sizes
+                    centers = []
+                    half_sizes = []
+                    
+                    for box in boxes:
+                        x, y, width, height = box
+                        center_x = x + width / 2
+                        center_y = y + height / 2
+                        half_width = width / 2
+                        half_height = height / 2
+                        
+                        centers.append([center_x, center_y])
+                        half_sizes.append([half_width, half_height])
+                    
+                    centers_array = np.array(centers)
+                    half_sizes_array = np.array(half_sizes)
+                    
+                    # Log the bounding boxes
+                    rr.log("video/yolo_detections", rr.Boxes2D(
+                        centers=centers_array,
+                        half_sizes=half_sizes_array,
+                        colors=colors,
+                        labels=labels,
+                        class_ids=class_ids
+                    ))
+                else:
+                    # Clear bounding boxes if no valid detections
+                    rr.log("video/yolo_detections", rr.Clear(recursive=False))
+            else:
+                # Clear bounding boxes if no detections for this step
+                rr.log("video/yolo_detections", rr.Clear(recursive=False))
+        else:
+            # Clear bounding boxes if no data for this step
+            rr.log("video/yolo_detections", rr.Clear(recursive=False))
+    
     def _calculate_warning_level(self, distance: float) -> str:
         """Calculate warning level based on distance thresholds."""
         if distance <= self.config['warning_distance_critical']:
@@ -1678,6 +1835,8 @@ Examples:
     python visualize_slam_output.py ./outputs --warning-distance-critical 0.15 --warning-distance-caution 0.8
     python visualize_slam_output.py ./outputs --no-warnings
     python visualize_slam_output.py ./outputs --no-directional-warnings
+    python visualize_slam_output.py ./outputs --show-yolo-detections --yolo-confidence-threshold 0.5
+    python visualize_slam_output.py ./outputs --show-yolo-detections --no-video
     
 Note: 
 - View cone settings will be automatically configured from pipeline metadata if available.
@@ -1690,6 +1849,10 @@ Note:
 - Video will be automatically loaded from pipeline configuration if available.
 - Warning system provides proximity alerts with color-coded visualization and directional guidance.
 - Warning levels: Normal (>0.6m, green), Caution (0.4-0.6m, yellow), Strong (0.2-0.4m, orange), Critical (<0.2m, red).
+- YOLO detection visualization: Use --show-yolo-detections to overlay bounding boxes on video frames.
+- YOLO data is loaded from incremental_analysis_detailed_yolo_detections.csv in the output directory.
+- Bounding boxes are color-coded by class and include confidence scores in labels.
+- Use --yolo-confidence-threshold to filter detections below a certain confidence level.
 
         """
     )
@@ -1724,6 +1887,8 @@ Note:
 
     parser.add_argument('--no-video', action='store_true',
                        help='Disable video visualization')
+    parser.add_argument('--show-yolo-detections', action='store_true',
+                       help='Enable YOLO bounding box visualization on video frames')
     
     # Visualization parameters
     parser.add_argument('--floor-threshold', type=float, default=0.05,
@@ -1748,6 +1913,10 @@ Note:
     # Video synchronization parameters  
     parser.add_argument('--video-sync-tolerance', type=float, default=1.0,
                        help='(Deprecated - now using step-based sync) Maximum time difference (seconds) to consider trajectory and video frames synchronized')
+    
+    # YOLO detection parameters
+    parser.add_argument('--yolo-confidence-threshold', type=float, default=0.3,
+                       help='Minimum confidence threshold for displaying YOLO detections (0.0-1.0)')
     
     # Warning system parameters
     parser.add_argument('--warning-distance-critical', type=float, default=0.2,
@@ -1779,6 +1948,8 @@ def main():
         'show_distance_lines': not args.no_distance_lines,
         'highlight_floor_points': not args.no_highlight_floor,
         'show_video': not args.no_video,
+        'show_yolo_detections': args.show_yolo_detections,
+        'yolo_confidence_threshold': args.yolo_confidence_threshold,
         'floor_threshold': args.floor_threshold,
         'grid_size': args.grid_size,
         'view_cone_angle': args.cone_angle,
