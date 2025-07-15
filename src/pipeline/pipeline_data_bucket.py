@@ -36,6 +36,8 @@ class PipelineDataBucket:
         "n_closest_points_3d", 
         "n_closest_points_index", 
         "n_closest_points_distance_2d",
+        "n_closest_points_segment_ids",
+        "n_closest_points_class_labels",
         "view_cone_mask",
 
         "image_segmentation_mask",

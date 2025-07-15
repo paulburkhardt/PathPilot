@@ -13,7 +13,10 @@ from omegaconf import DictConfig, OmegaConf
 class EnhancedSLAMOutputWriter(AbstractDataWriter):
     """
     Enhanced writer component for saving comprehensive SLAM analysis outputs.
-    Handles point clouds, trajectories, floor detection, closest point analysis, and object mapping.
+    Handles point clouds, trajectories, floor detection, and closest point analysis.
+    
+    When closest point segment IDs are available, creates a CSV file with detected objects containing:
+    step, closest_3d_x, closest_3d_y, closest_3d_z, closest_2d_distance, segment_id, class_label
     
     Args:
         output_dir: Directory where outputs will be written (default: "enhanced_slam_outputs")
@@ -48,7 +51,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                  save_intermediate: bool = False,
                  intermediate_interval: int = 10,
                  create_timestamped_dir: bool = True,
-                 analysis_format: str = 'json') -> None:
+                 analysis_format: str = 'json',
+                 save_closest_points_segment_ids: bool = True) -> None:
         super().__init__(output_dir)
         self.output_name = output_name
         self.save_point_cloud = save_point_cloud
@@ -61,6 +65,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.intermediate_interval = intermediate_interval
         self.create_timestamped_dir = create_timestamped_dir
         self.analysis_format = analysis_format.lower()
+        self.save_closest_points_segment_ids = save_closest_points_segment_ids
         
         if self.analysis_format not in ['json', 'csv']:
             raise ValueError("analysis_format must be 'json' or 'csv'")
@@ -72,6 +77,10 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.accumulated_n_closest_points_3d = []  # Now stores arrays of n points
         self.accumulated_n_closest_points_indices = []  # Now stores arrays of n indices
         self.accumulated_n_closest_points_distances = []  # Now stores arrays of n distances
+        # Only initialize segment IDs accumulator if we need to save them
+        if self.save_closest_points_segment_ids:
+            self.accumulated_n_closest_points_segment_ids = []  # Store segment IDs for each closest point
+            self.accumulated_n_closest_points_class_labels = []  # Store class labels for each closest point
         self.accumulated_yolo_detections = []  # Store YOLO detections per frame
         self.accumulated_segmentation_labels = []  # Store segmentation labels per frame
         self.floor_data = None
@@ -100,6 +109,10 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             ])
         if self.save_object_mapping:
             inputs.extend(["objects", "object_dict"])
+            # Only add segment IDs if specifically requested
+            if self.save_closest_points_segment_ids:
+                inputs.append("n_closest_points_segment_ids")
+                inputs.append("n_closest_points_class_labels")
         if self.save_yolo_detections:
             inputs.append("yolo_detections")
         # Always try to get segmentation labels if available
@@ -137,6 +150,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
              floor_normal=None, floor_offset=None,
              n_closest_points_3d=None, n_closest_points_index=None, n_closest_points_distance_2d=None,
              objects=None, object_dict=None,
+             n_closest_points_segment_ids=None, n_closest_points_class_labels=None, 
              yolo_detections=None, segmentation_labels=None,
              **kwargs: Any) -> Dict[str, Any]:
         """
@@ -154,6 +168,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             n_closest_points_distance_2d: Current 3D distance to closest point
             objects: Current frame objects
             object_dict: Object3D mapping dictionary
+            n_closest_points_segment_ids: Segment IDs for the closest points (e.g., 1, 2, 3)
+            n_closest_points_class_labels: Class labels for the closest points (e.g., 'Chair', 'Table')
             yolo_detections: YOLO object detection results
             segmentation_labels: Mapping of segment IDs to class labels
             **kwargs: Additional arguments
@@ -193,6 +209,19 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                     self.accumulated_n_closest_points_indices.append(indices.tolist())
                 else:
                     self.accumulated_n_closest_points_indices.append(None)
+                
+                # Store the segment IDs if provided and if we're configured to save them
+                if self.save_closest_points_segment_ids:
+                    if n_closest_points_segment_ids is not None:
+                        self.accumulated_n_closest_points_segment_ids.append(n_closest_points_segment_ids)
+                    else:
+                        self.accumulated_n_closest_points_segment_ids.append(None)
+                    
+                    # Store the class labels if provided
+                    if n_closest_points_class_labels is not None:
+                        self.accumulated_n_closest_points_class_labels.append(n_closest_points_class_labels)
+                    else:
+                        self.accumulated_n_closest_points_class_labels.append(None)
         
         # Accumulate YOLO detection data
         if self.save_yolo_detections:
@@ -240,6 +269,15 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         if self.save_closest_points and len(self.accumulated_n_closest_points_distances) > 0:
             closest_path = self._save_closest_points_data()
             results["closest_points_path"] = str(closest_path)
+            
+        # Save closest points with segment IDs if segment IDs are available
+        if any(segment_ids is not None for segment_ids in self.accumulated_n_closest_points_segment_ids):
+            closest_objects_path = self._save_closest_objects_csv()
+            results["closest_objects_path"] = str(closest_objects_path)
+        
+        if self.save_object_mapping and self.object_mapping is not None:
+            object_path = self._save_object_mapping_data()
+            results["object_mapping_path"] = str(object_path)
         
         if self.save_object_mapping and self.object_mapping is not None:
             object_path = self._save_object_mapping_data()
@@ -523,6 +561,54 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         print(f"Saving object mapping with {len(self.object_mapping)} objects to: {object_path}")
         return object_path
     
+    def _save_closest_objects_csv(self) -> pathlib.Path:
+        """Save closest points with segment IDs in CSV format."""
+        closest_objects_path = self.final_output_dir / f"{self.output_name}_closest_objects.csv"
+        
+        print(f"Saving closest objects data to: {closest_objects_path}")
+        
+        with open(closest_objects_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            # Write header based on whether segment IDs are available
+            if self.save_closest_points_segment_ids:
+                writer.writerow(['step', 'closest_3d_x', 'closest_3d_y', 'closest_3d_z', 'closest_2d_distance', 'segment_id', 'class_label'])
+            else:
+                writer.writerow(['step', 'closest_3d_x', 'closest_3d_y', 'closest_3d_z', 'closest_2d_distance'])
+            
+            for step_i in range(len(self.accumulated_n_closest_points_3d)):
+                points_3d = self.accumulated_n_closest_points_3d[step_i]
+                distances = self.accumulated_n_closest_points_distances[step_i]
+                
+                # Get segment IDs if available
+                segment_ids = None
+                class_labels = None
+                if self.save_closest_points_segment_ids and hasattr(self, 'accumulated_n_closest_points_segment_ids'):
+                    segment_ids = self.accumulated_n_closest_points_segment_ids[step_i] if step_i < len(self.accumulated_n_closest_points_segment_ids) else None
+                    class_labels = self.accumulated_n_closest_points_class_labels[step_i] if hasattr(self, 'accumulated_n_closest_points_class_labels') and step_i < len(self.accumulated_n_closest_points_class_labels) else None
+                
+                # Handle case where we have data
+                if points_3d and distances:
+                    # Write each closest point as a separate row
+                    for point_idx, (point, distance) in enumerate(zip(points_3d, distances)):
+                        row = [
+                            step_i,                # step
+                            point[0],              # closest_3d_x
+                            point[1],              # closest_3d_y  
+                            point[2],              # closest_3d_z
+                            distance,              # closest_2d_distance
+                        ]
+                        
+                        # Add segment ID and class label if enabled
+                        if self.save_closest_points_segment_ids:
+                            segment_id = segment_ids[point_idx] if segment_ids and point_idx < len(segment_ids) else -1
+                            class_label = class_labels[point_idx] if class_labels and point_idx < len(class_labels) else "unknown"
+                            row.append(segment_id)
+                            row.append(class_label)
+                        
+                        writer.writerow(row)
+        
+        return closest_objects_path
+    
     def _save_yolo_detections(self) -> pathlib.Path:
         """Save YOLO detection data."""
         if self.analysis_format == 'json':
@@ -795,6 +881,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "trajectory_duration": (max(self.accumulated_timestamps) - min(self.accumulated_timestamps)) if len(self.accumulated_timestamps) > 1 else 0,
                 "has_floor_data": self.floor_data is not None,
                 "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
+                "n_closest_points_with_segment_ids_count": sum(1 for segment_ids in self.accumulated_n_closest_points_segment_ids if segment_ids is not None),
+                "n_closest_points_with_class_labels_count": sum(1 for class_labels in self.accumulated_n_closest_points_class_labels if class_labels is not None) if hasattr(self, 'accumulated_n_closest_points_class_labels') else 0,
                 "yolo_detections_count": len(self.accumulated_yolo_detections),
                 "segmentation_labels_count": len(self.accumulated_segmentation_labels),
                 "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
