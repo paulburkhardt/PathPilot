@@ -39,7 +39,7 @@ pipeline:
         downsample_rate : 1
         min_cluster_size: 1000
         neighbor_distance:  0.05
-        ignore_backround: True 
+        ignore_backround: False 
 
     - type: ImageEmbeddingSegmenter
       config:
@@ -67,7 +67,7 @@ pipeline:
         sample_ratio: 0.15  # Slightly more points for better accuracy
         ransac_threshold: 0.05
         min_inliers: 1000
-        floor_threshold: 0.05
+        floor_threshold: 0.1
         refine_interval: 10  # Refine every 10 frames for better accuracy
         max_refinement_poses: 30  # Use last 30 poses for refinement
     
@@ -76,8 +76,10 @@ pipeline:
       config:
         use_view_cone: true  # Set to true to enable view cone filtering
         cone_angle_deg: 90.0
-        use_segmentation_filter: true  # Enable filtering based on segmentation masks
-        n_closest_points: 20  # Number of closest points to return
+        floor_distance_threshold: 0.12
+        use_segmentation_filter: True  # Enable filtering based on segmentation masks
+        use_object_segmentation_filter: False # either use_segmentation_filter or use_object_segmentation_filter
+        n_closest_points: 4  # Number of closest points to return
         
     # Enhanced output writer with intermediate saving enabled
     - type: EnhancedSLAMOutputWriter

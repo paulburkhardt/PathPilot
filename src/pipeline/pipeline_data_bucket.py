@@ -48,6 +48,7 @@ class PipelineDataBucket:
         "segmentation_labels",
 
         "object_point_cloud",
+        "backround",
         "objects",
         "object_dict",
 

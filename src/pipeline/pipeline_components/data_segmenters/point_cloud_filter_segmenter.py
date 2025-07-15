@@ -30,6 +30,7 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         self.neighbor_distance = neighbor_distance
         self.ignore_backround = ignore_backround
         self.rewrite_pointcloud = rewrite_pointcloud
+        self.backround = None
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -41,7 +42,9 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         """This component outputs segmented point clouds."""
         output = ["object_point_cloud" ]
         if self.rewrite_pointcloud:
-           output.append("point_cloud" ) 
+            output.append("point_cloud" ) 
+        if not self.ignore_backround:
+            output.append("backround" ) 
         return output
     
     def _run(self, point_cloud: Any, key_frame_flag, **kwargs: Any) -> Dict[str, Any]:
@@ -58,6 +61,8 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
             output = {"object_point_cloud": None }
             if self.rewrite_pointcloud:
                 output["point_cloud"]  = point_cloud
+            if not self.ignore_backround:
+                output["backround"]  = self.backround
             return output
  
         
@@ -71,16 +76,16 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         print(unique_ids)
         # splits = np.cumsum(counts)[:-1]
         splits = np.cumsum(counts)[:-1]
-        
-
         object_pointclouds = {}
         all_points = []
         for obj_id, arr in zip(unique_ids, np.split(sorted_pc, splits)):
 
-            if obj_id == 0 and self.ignore_backround: #NOTE its good to do this since we also dont have a mask for it
+            points = arr[:, :-1]
+
+            if obj_id == 0 and not self.ignore_backround: #NOTE its good to do this since we also dont have a mask for it
+                self.backround = points[:,:3]
                 continue
 
-            points = arr[:, :-1]
             # Remove all-zero points
             if len(points) > 0:
                 db = DBSCAN(eps= self.neighbor_distance, min_samples=5).fit(points[:,:3])
@@ -110,6 +115,8 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         output = {"object_point_cloud": object_pointclouds }
         if self.rewrite_pointcloud:
             output["point_cloud"]  = point_cloud
+        if not self.ignore_backround:
+            output["backround"]  = self.backround
         return output
     
     

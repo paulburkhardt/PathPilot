@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from scipy.spatial import cKDTree
 from ..abstract_pipeline_component import AbstractPipelineComponent
+from src.pipeline.data_entities.object_data_entity import ObjectDataEntity
 
 
 class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
@@ -30,16 +31,21 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                  cone_angle_deg: float = 90.0,
                  floor_distance_threshold: float = 0.05,
                  n_closest_points: int = 20,
-                 use_segmentation_filter: bool = True) -> None:
+                 use_segmentation_filter: bool = True,
+                 use_object_segmentation_filter: bool = False
+                 ) -> None:
         super().__init__()
         self.use_view_cone = use_view_cone
         self.cone_angle_deg = cone_angle_deg
         self.floor_distance_threshold = floor_distance_threshold
         self.n_closest_points = n_closest_points
         self.use_segmentation_filter = use_segmentation_filter
-        
+        self.use_object_segmentation_filter  = use_object_segmentation_filter
         # Persistent mapping from segment ID to class label
         self.segment_id_to_class_mapping = {}
+
+        if self.use_segmentation_filter and self.use_object_segmentation_filter:
+            raise ValueError("Only one of 'use_segmentation_filter' or 'use_object_segmentation_filter' can be True. Please set only one to True.")
 
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -49,6 +55,9 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         # Add segmentation inputs if filtering is enabled
         if self.use_segmentation_filter:
             inputs.extend(["image_segmentation_mask", "segmentation_labels"])
+
+        if self.use_object_segmentation_filter:
+            inputs.extend(["objects","backround"])
             
         return inputs
     
@@ -68,7 +77,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             outputs.append("view_cone_mask")
             
         # Add segment IDs if segmentation filtering is enabled
-        if self.use_segmentation_filter:
+        if self.use_segmentation_filter or self.use_object_segmentation_filter:
             outputs.append("n_closest_points_segment_ids")
             outputs.append("n_closest_points_class_labels")
             
@@ -300,6 +309,8 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
              floor_offset: Optional[float] = None,
              image_segmentation_mask=None,
              segmentation_labels=None,
+             objects=None,
+             backround = None,
              **kwargs: Any) -> Dict[str, Any]:
         """
         Find closest point for the current camera position.
@@ -312,15 +323,131 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             floor_offset: Floor plane offset (if floor distance enabled)
             image_segmentation_mask: Optional image segmentation mask
             segmentation_labels: Optional mapping from segment IDs to class labels
+            objects: Optional list of ObjectDataEntity for object segmentation filtering
             **kwargs: Additional arguments
             
         Returns:
             Dictionary containing closest point analysis results for current position
         """
         
-        # Get point cloud as numpy array (shape: [N, 3])
-        points_3d = point_cloud.as_numpy()  # Shape: [N, 3]
+        if not self.use_object_segmentation_filter:
+            points_3d = point_cloud.as_numpy()  # Shape: [N, 3]
+            return self.generate_output(camera_pose, 
+                                        points_3d, 
+                                        floor_normal, 
+                                        floor_offset, 
+                                        step_nr, 
+                                        point_cloud,
+                                        image_segmentation_mask,
+                                        segmentation_labels)
+        else:
+            # Generate outputs for background and each object
+            background_output = self.generate_output(
+                camera_pose,
+                backround,
+                floor_normal,
+                floor_offset,
+                step_nr,
+                point_cloud,
+                image_segmentation_mask,
+                segmentation_labels
+            )
+            object_outputs = [
+                self.generate_output(
+                    camera_pose,
+                    obj.points,
+                    floor_normal,
+                    floor_offset,
+                    step_nr,
+                    point_cloud,
+                    image_segmentation_mask,
+                    segmentation_labels
+                ) for obj in objects
+            ]
+
+            # Collect all closest points, indices, and distances, tagging with object index
+            all_points = []
+            all_indices = []
+            all_distances = []
+            all_object_indices = []
+
+            # Background (object_index = 0)
+            for i in range(len(background_output["n_closest_points_3d"])):
+                all_points.append(background_output["n_closest_points_3d"][i])
+                all_indices.append(background_output["n_closest_points_index"][i])
+                all_distances.append(background_output["n_closest_points_distance_2d"][i])
+                all_object_indices.append(0)
+
+            # Objects (object_index = 1, 2, ...)
+            for obj_idx, obj_output in enumerate(object_outputs, start=1):
+                for i in range(len(obj_output["n_closest_points_3d"])):
+                    all_points.append(obj_output["n_closest_points_3d"][i])
+                    all_indices.append(obj_output["n_closest_points_index"][i])
+                    all_distances.append(obj_output["n_closest_points_distance_2d"][i])
+                    all_object_indices.append(obj_idx)
+
+            # Convert to numpy arrays
+            all_points = np.array(all_points)
+            all_indices = np.array(all_indices)
+            all_distances = np.array(all_distances)
+            all_object_indices = np.array(all_object_indices)
+
+            # Sort by distance
+            sort_idx = np.argsort(all_distances)
+            all_points = all_points[sort_idx]
+            all_indices = all_indices[sort_idx]
+            all_distances = all_distances[sort_idx]
+            all_object_indices = all_object_indices[sort_idx]
+
+            # Prepare output dictionary (like use_segmentation_filter)
+            outputs = {
+                "n_closest_points_3d": all_points,
+                "n_closest_points_index": all_indices,
+                "n_closest_points_distance_2d": all_distances,
+            }
+            # Optionally, add floor_filtered_mask/view_cone_mask if needed (from background or first object)
+            outputs["floor_filtered_mask"] = background_output.get("floor_filtered_mask", np.array([]))
+            if self.use_view_cone:
+                outputs["view_cone_mask"] = background_output.get("view_cone_mask", np.array([]))
+
+            # Prepare segment_ids and class_labels arrays
+            segment_ids = []
+            class_labels = []
+
+            # Background (object_index = 0): segment_id = -1, class_label = 'background'
+            for i in range(len(background_output["n_closest_points_3d"])):
+                segment_ids.append(-1)
+                class_labels.append("background")
+
+            # Objects (object_index = 1, 2, ...): use obj.id and obj.description
+            for obj_idx, obj in enumerate(objects, start=1):
+                obj_output = object_outputs[obj_idx - 1]
+                for i in range(len(obj_output["n_closest_points_3d"])):
+                    segment_ids.append(obj.id)
+                    class_labels.append(obj.description)
+
+            # Convert to numpy arrays and sort accordingly
+            segment_ids = np.array(segment_ids)
+            class_labels = np.array(class_labels)
+            segment_ids = segment_ids[sort_idx].tolist()
+            class_labels = class_labels[sort_idx].tolist()
+
+            outputs["n_closest_points_segment_ids"] = segment_ids
+            outputs["n_closest_points_class_labels"] = class_labels
+            return outputs
         
+
+
+    def generate_output(self,
+                        camera_pose,
+                        points_3d,
+                        floor_normal, 
+                        floor_offset,
+                        step_nr, 
+                        point_cloud, 
+                        image_segmentation_mask, 
+                        segmentation_labels):
+
         # Check if we have enough points
         if len(points_3d) == 0:
             outputs = {
@@ -424,6 +551,38 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         else:
             view_cone_mask_full = np.ones(len(points_3d), dtype=bool)
         
+
+        closest_points_3d,closest_original_indices, closest_distances_2d = self.find_closest_points(floor_normal,
+                                                                                                    floor_offset, 
+                                                                                                    current_points,
+                                                                                                    current_indices,
+                                                                                                    camera_position)
+        
+        outputs = {
+            "n_closest_points_3d": closest_points_3d,
+            "n_closest_points_index": closest_original_indices,
+            "n_closest_points_distance_2d": closest_distances_2d,
+            "floor_filtered_mask": floor_filtered_mask,
+        }
+        
+        # Add view cone mask if enabled
+        if self.use_view_cone:
+            outputs["view_cone_mask"] = view_cone_mask_full
+        
+        # Add segmentation data if enabled
+        if self.use_segmentation_filter:
+            segment_ids, class_labels = self._get_closest_points_segmentation_data(
+                closest_original_indices, point_cloud, segmentation_labels
+            )
+            outputs["n_closest_points_segment_ids"] = segment_ids
+            outputs["n_closest_points_class_labels"] = class_labels
+        
+        
+        return outputs
+        
+
+
+    def find_closest_points(self,floor_normal,floor_offset, current_points, current_indices, camera_position):
         # Calculate distances based on available data
         if floor_normal is not None and floor_offset is not None:
             # Use floor-projected 2D distances when floor data is available
@@ -452,8 +611,12 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             # Use simple 3D euclidean distances when floor data is not available
             distances_2d = np.linalg.norm(current_points - camera_position[np.newaxis, :], axis=1)
         
+        if self.use_object_segmentation_filter:
+            n_closest_points = 1
+        else: 
+            n_closest_points = self.n_closest_points
         # Find the n closest points
-        n_points = min(self.n_closest_points, len(current_points))
+        n_points = min(n_closest_points, len(current_points))
         closest_indices = np.argpartition(distances_2d, n_points)[:n_points]
         
         # Sort the closest indices by distance
@@ -463,25 +626,5 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         closest_points_3d = current_points[sorted_closest_indices]
         closest_distances_2d = distances_2d[sorted_closest_indices]
         closest_original_indices = current_indices[sorted_closest_indices]
-        
-        outputs = {
-            "n_closest_points_3d": closest_points_3d,
-            "n_closest_points_index": closest_original_indices,
-            "n_closest_points_distance_2d": closest_distances_2d,
-            "floor_filtered_mask": floor_filtered_mask,
-        }
-        
-        # Add view cone mask if enabled
-        if self.use_view_cone:
-            outputs["view_cone_mask"] = view_cone_mask_full
-        
-        # Add segmentation data if enabled
-        if self.use_segmentation_filter:
-            segment_ids, class_labels = self._get_closest_points_segmentation_data(
-                closest_original_indices, point_cloud, segmentation_labels
-            )
-            outputs["n_closest_points_segment_ids"] = segment_ids
-            outputs["n_closest_points_class_labels"] = class_labels
-        
-        return outputs
-        
+
+        return closest_points_3d,closest_original_indices, closest_distances_2d
