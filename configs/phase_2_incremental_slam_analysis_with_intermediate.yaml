@@ -19,7 +19,7 @@ pipeline:
     - type: ImageDataSegmenter
       config:
         model_cfg_path: "sam2.1/sam2.1_hiera_t.yaml"
-        checkpoint_path: "segment-anything-2/checkpoints/sam2.1_hiera_tiny.pt"
+        checkpoint_path: "segment_anything_2/checkpoints/sam2.1_hiera_tiny.pt"
         detection_interval: 1    # Use YOLO detections every 5 frames (matches YOLO interval)
         min_mask_region_area: 200  # Minimum area for valid masks
         save_debug_images: true  # Enable debug image saving
@@ -43,13 +43,13 @@ pipeline:
 
     - type: ImageEmbeddingSegmenter
       config:
-        text: "In this room is a" # the prompt to generat
+        text: "Describe the object: " # the prompt to generat
 
 
     - type: BBoxObjectDatabase
       config: 
-        match_threshold : 0.15 #
-        embedding_weight : 0.85
+        match_threshold : 0.3 #
+        embedding_weight : 0.8
         running_embedding_weight  :  0.7 
         knn_count  :  4
         use_blip  :  True 

@@ -26,7 +26,7 @@ data/*
 enhanced_slam_outputs/
 *.json
 
-
+segment_anything_2/
 sam2/
 MASt3R-SLAM/
 blip-base

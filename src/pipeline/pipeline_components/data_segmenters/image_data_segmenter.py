@@ -8,7 +8,7 @@ import cv2
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../segment-anything-2/sam2')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../segment_anything_2/sam2')))
 from build_sam import build_sam2_camera_predictor, build_sam2
 from automatic_mask_generator import SAM2AutomaticMaskGenerator
 

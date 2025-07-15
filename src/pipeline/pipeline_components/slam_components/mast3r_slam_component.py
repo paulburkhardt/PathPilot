@@ -504,8 +504,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         #update the pointcloud with every frame, but only have parts of the color
         elif self.point_cloud_method == "refreshing" and (add_new_kf or init_kf):
 
-            if self.segment_point_cloud:
-                raise NotImplementedError("segmentation currently only available for accumulating mode.")
+            # if self.segment_point_cloud:
+            #     raise NotImplementedError("segmentation currently only available for accumulating mode.")
 
             if config["use_calib"] and calibration_K is not None:
                 X_canon = constrain_points_to_ray(
@@ -520,6 +520,10 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                     frame.get_average_conf().cpu().numpy().astype(np.float32).reshape(-1)
                     > self.c_confidence_threshold
                 )
+            if self.segment_point_cloud:
+                    seg_mask = keyframe.img_segmentation_mask.cpu().numpy().astype(np.uint8).reshape(-1)
+                    segmentation_masks.append(seg_mask[valid])
+                    segmentation_masks = np.concatenate(segmentation_masks,axis=0)
 
             pointclouds = pW
             colors = color

@@ -23,16 +23,27 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
     """
 
     def __init__(self, 
-                text= "A picture of"
+                text = "A picture of",
+                max_tokens = 4,
+                add_description = True,
                 ) -> None:
         super().__init__()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         save_directory = "./blip-base"
+        # Check if the model directory exists; if not, download and save
+        if not os.path.exists(save_directory):
+            print(f"Directory {save_directory} does not exist. Downloading BLIP model and processor...")
+            processor = AutoProcessor.from_pretrained("Salesforce/blip-image-captioning-base", use_safetensors=True, trust_remote_code=True)
+            model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base", use_safetensors=True, trust_remote_code=True)
+            processor.save_pretrained(save_directory)
+            model.save_pretrained(save_directory)
+            print(f"BLIP model and processor saved to {save_directory}.")
         self.processor = AutoProcessor.from_pretrained(save_directory, use_safetensors=True, trust_remote_code=True)
         self.model = BlipForConditionalGeneration.from_pretrained(save_directory,  use_safetensors=True, trust_remote_code=True)
         self.model.to(self.device)
         self.text = text
-
+        self.max_tokens = max_tokens
+        self.add_description = add_description
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -222,34 +233,32 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
             obj_emb = patch_embeds_masked[flat_mask.bool()].mean(dim=0)
             normalized_embedding = F.normalize(obj_emb, p=2, dim=-1).unsqueeze(0)  # Add batch dimension
 
-            # 9. Generate caption using masked encoder with better prompting
-            # Use a simple prompt for adjective + object format
-            dec_input = self.processor.tokenizer(self.text, return_tensors="pt").to(self.device)
-            
-            generated = self.model.text_decoder.generate(
-                input_ids=dec_input.input_ids,
-                attention_mask=dec_input.attention_mask,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
-                max_new_tokens=4,
-                do_sample=True,
-                temperature=0.6,
-                top_p=0.8,
-                repetition_penalty=1.5,
-                pad_token_id=self.processor.tokenizer.eos_token_id,
-                eos_token_id=self.processor.tokenizer.eos_token_id
-            )
-            generated_caption = self.processor.tokenizer.decode(generated[0], skip_special_tokens=True)
-            # Clean up the caption to get just the adjective + object
-            if generated_caption.startswith("a "):
-                generated_caption = generated_caption[2:].strip()
-            elif generated_caption.startswith("an "):
-                generated_caption = generated_caption[3:].strip()
-            elif generated_caption.startswith(self.text):
+            if self.add_description:
+                # 9. Generate caption using masked encoder with better prompting
+                # Use a simple prompt for adjective + object format
+                dec_input = self.processor.tokenizer(self.text, return_tensors="pt").to(self.device)
+                
+                generated = self.model.text_decoder.generate(
+                    input_ids=dec_input.input_ids,
+                    attention_mask=dec_input.attention_mask,
+                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_attention_mask=encoder_attention_mask,
+                    max_new_tokens=self.max_tokens,
+                    do_sample=True,
+                    temperature=0.3,
+                    top_p=0.8,
+                    repetition_penalty=1.5,
+                    pad_token_id=self.processor.tokenizer.eos_token_id,
+                    eos_token_id=self.processor.tokenizer.eos_token_id
+                )
+                generated_caption = self.processor.tokenizer.decode(generated[0], skip_special_tokens=True)
+                # Clean up the caption to get just the adjective + object
                 generated_caption = generated_caption[len(self.text):].strip()
-
-
-            # # Generate a Caption for the Masked Object
+            
+            else: generated_caption= ""
+            
+            
+            # Generate a Caption for the Masked Object
             # generated_ids = self.model.generate(pixel_values=inputs.pixel_values, max_length=50)
             # generated_caption = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
             
