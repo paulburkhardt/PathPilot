@@ -355,7 +355,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             object_outputs = [
                 self.generate_output(
                     camera_pose,
-                    obj.points,
+                    obj.points.as_numpy(),
                     floor_normal,
                     floor_offset,
                     step_nr,

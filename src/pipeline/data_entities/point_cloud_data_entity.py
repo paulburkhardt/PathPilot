@@ -162,3 +162,42 @@ class PointCloudDataEntity(AbstractDataEntity):
             return torch.cat(components, dim=-1)
         else:
             return self.point_cloud_pytorch
+
+    @staticmethod
+    def vstack(entity1: 'PointCloudDataEntity', entity2: 'PointCloudDataEntity') -> 'PointCloudDataEntity':
+        """
+        Vertically stack two PointCloudDataEntity objects into a new one.
+        All optional fields (rgb, confidence_scores, segmentation_mask) must be present in both or neither.
+        Args:
+            entity1: First PointCloudDataEntity
+            entity2: Second PointCloudDataEntity
+        Returns:
+            PointCloudDataEntity: New entity with stacked data
+        Raises:
+            ValueError: If the two entities are incompatible (e.g., one has rgb and the other does not)
+        """
+        def check_compat(attr):
+            return (getattr(entity1, attr) is not None) == (getattr(entity2, attr) is not None)
+
+        if not (entity1.point_cloud_numpy.shape[1] == entity2.point_cloud_numpy.shape[1] == 3):
+            raise ValueError("Both point clouds must have shape (N, 3)")
+        if not check_compat('rgb_numpy'):
+            raise ValueError("Both entities must have rgb or neither.")
+        if not check_compat('confidence_scores_numpy'):
+            raise ValueError("Both entities must have confidence_scores or neither.")
+        if not check_compat('segmentation_mask_numpy'):
+            raise ValueError("Both entities must have segmentation_mask or neither.")
+
+        point_cloud = np.vstack([entity1.point_cloud_numpy, entity2.point_cloud_numpy])
+        rgb = None
+        confidence_scores = None
+        segmentation_mask = None
+        if entity1.rgb_numpy is not None:
+            rgb = np.vstack([entity1.rgb_numpy, entity2.rgb_numpy])
+        if entity1.confidence_scores_numpy is not None:
+            confidence_scores = np.vstack([entity1.confidence_scores_numpy, entity2.confidence_scores_numpy])
+        if entity1.segmentation_mask_numpy is not None:
+            segmentation_mask = np.vstack([entity1.segmentation_mask_numpy, entity2.segmentation_mask_numpy])
+        return PointCloudDataEntity(point_cloud, rgb, confidence_scores, segmentation_mask)
+
+

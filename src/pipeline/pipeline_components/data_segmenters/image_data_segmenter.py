@@ -158,9 +158,9 @@ class ImageDataSegmenter(AbstractDataSegmenter):
             # Map the segment integer to class label if available
             if seg_id in self.id_to_class_label:
                 current_segmentation_labels[seg_int] = self.id_to_class_label[seg_id]
-        print(self.mask_dic.keys())
-        print("here are the ids:")
-        print(np.unique(segmentation_mask))
+        # print(self.mask_dic.keys())
+        # print("here are the ids:")
+        # print(np.unique(segmentation_mask))
 
         #print(segmentation_mask)
         # Save debug images if enabled

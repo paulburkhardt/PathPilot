@@ -502,12 +502,42 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             # Convert Object3D objects to serializable format
             serializable_objects = {}
             for obj_id, obj in self.object_mapping.items():
-                # Save points to a separate .npy file if available
+                # Save points and additional PointCloudDataEntity attributes to separate files if available
                 points_file = None
+                rgb_file = None
+                confidence_file = None
+                segmentation_file = None
+                points_shape = None
                 if hasattr(obj, 'points') and obj.points is not None:
-                    points_file = self.final_output_dir / f"object_{obj_id}_points.npy"
-                    np.save(points_file, obj.points)
-                    points_file = str(points_file)
+                    points = obj.points
+                    # If points is a PointCloudDataEntity, save its attributes
+                    if hasattr(points, 'as_numpy'):
+                        points_numpy = points.as_numpy()
+                        points_file = self.final_output_dir / f"object_{obj_id}_points.npy"
+                        np.save(points_file, points_numpy)
+                        points_file = str(points_file)
+                        points_shape = points_numpy.shape
+                        # Save rgb_numpy if present
+                        if hasattr(points, 'rgb_numpy') and points.rgb_numpy is not None:
+                            rgb_file = self.final_output_dir / f"object_{obj_id}_rgb.npy"
+                            np.save(rgb_file, points.rgb_numpy)
+                            rgb_file = str(rgb_file)
+                        # Save confidence_scores_numpy if present
+                        if hasattr(points, 'confidence_scores_numpy') and points.confidence_scores_numpy is not None:
+                            confidence_file = self.final_output_dir / f"object_{obj_id}_confidence.npy"
+                            np.save(confidence_file, points.confidence_scores_numpy)
+                            confidence_file = str(confidence_file)
+                        # Save segmentation_mask_numpy if present
+                        if hasattr(points, 'segmentation_mask_numpy') and points.segmentation_mask_numpy is not None:
+                            segmentation_file = self.final_output_dir / f"object_{obj_id}_segmentation.npy"
+                            np.save(segmentation_file, points.segmentation_mask_numpy)
+                            segmentation_file = str(segmentation_file)
+                    # If points is a numpy array (backward compatibility)
+                    elif isinstance(points, np.ndarray):
+                        points_file = self.final_output_dir / f"object_{obj_id}_points.npy"
+                        np.save(points_file, points)
+                        points_file = str(points_file)
+                        points_shape = points.shape
                 serializable_objects[str(obj_id)] = {
                     "id": obj.id,
                     "mask_ids": list(obj.mask_id),
@@ -516,10 +546,14 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                     "cum_sum": obj.cum_sum.tolist() if isinstance(obj.cum_sum, np.ndarray) else obj.cum_sum,
                     "cum_len": obj.cum_len,
                     "description": obj.description,
-                    "embeddings_shape": obj.embeddings.shape if obj.embeddings is not None else None,
-                    "running_embedding_shape": obj.running_embedding.shape if obj.running_embedding is not None else None,
-                    "running_embedding_weight": obj.running_embedding_weight,
-                    "points_file": points_file
+                    "embeddings_shape": obj.embeddings.shape if hasattr(obj, 'embeddings') and obj.embeddings is not None else None,
+                    "running_embedding_shape": obj.running_embedding.shape if hasattr(obj, 'running_embedding') and obj.running_embedding is not None else None,
+                    "running_embedding_weight": obj.running_embedding_weight if hasattr(obj, 'running_embedding_weight') else None,
+                    "points_file": points_file,
+                    "points_shape": points_shape,
+                    "rgb_file": rgb_file,
+                    "confidence_file": confidence_file,
+                    "segmentation_file": segmentation_file
                 }
             data = {
                 "object_mapping": serializable_objects,
@@ -532,20 +566,47 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             object_path = self.final_output_dir / f"{self.output_name}_object_mapping.csv"
             with open(object_path, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['object_id', 'mask_ids', 'centroid_x', 'centroid_y', 'centroid_z', 
+                writer.writerow([
+                    'object_id', 'mask_ids', 'centroid_x', 'centroid_y', 'centroid_z',
                                'aabb_min_x', 'aabb_max_x', 'aabb_min_y', 'aabb_max_y', 'aabb_min_z', 'aabb_max_z',
-                               'cum_sum_x', 'cum_sum_y', 'cum_sum_z', 'cum_len', 'description', 'points_file'])
-                
+                    'cum_sum_x', 'cum_sum_y', 'cum_sum_z', 'cum_len', 'description', 'points_file',
+                    'points_shape', 'rgb_file', 'confidence_file', 'segmentation_file'
+                ])
                 for obj_id, obj in self.object_mapping.items():
                     mask_ids_str = ','.join(map(str, obj.mask_id))
                     centroid = obj.centroid
                     aabb = obj.aabb
                     cum_sum = obj.cum_sum
                     points_file = ''
+                    rgb_file = ''
+                    confidence_file = ''
+                    segmentation_file = ''
+                    points_shape = ''
                     if hasattr(obj, 'points') and obj.points is not None:
-                        points_file_path = self.final_output_dir / f"object_{obj_id}_points.npy"
-                        np.save(points_file_path, obj.points)
-                        points_file = str(points_file_path)
+                        points = obj.points
+                        if hasattr(points, 'as_numpy'):
+                            points_numpy = points.as_numpy()
+                            points_file_path = self.final_output_dir / f"object_{obj_id}_points.npy"
+                            np.save(points_file_path, points_numpy)
+                            points_file = str(points_file_path)
+                            points_shape = points_numpy.shape
+                            if hasattr(points, 'rgb_numpy') and points.rgb_numpy is not None:
+                                rgb_file_path = self.final_output_dir / f"object_{obj_id}_rgb.npy"
+                                np.save(rgb_file_path, points.rgb_numpy)
+                                rgb_file = str(rgb_file_path)
+                            if hasattr(points, 'confidence_scores_numpy') and points.confidence_scores_numpy is not None:
+                                confidence_file_path = self.final_output_dir / f"object_{obj_id}_confidence.npy"
+                                np.save(confidence_file_path, points.confidence_scores_numpy)
+                                confidence_file = str(confidence_file_path)
+                            if hasattr(points, 'segmentation_mask_numpy') and points.segmentation_mask_numpy is not None:
+                                segmentation_file_path = self.final_output_dir / f"object_{obj_id}_segmentation.npy"
+                                np.save(segmentation_file_path, points.segmentation_mask_numpy)
+                                segmentation_file = str(segmentation_file_path)
+                        elif isinstance(points, np.ndarray):
+                            points_file_path = self.final_output_dir / f"object_{obj_id}_points.npy"
+                            np.save(points_file_path, points)
+                            points_file = str(points_file_path)
+                            points_shape = points.shape
                     row = [
                         obj_id,
                         mask_ids_str,
@@ -554,7 +615,11 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                         cum_sum[0], cum_sum[1], cum_sum[2],
                         obj.cum_len,
                         obj.description or "",
-                        points_file
+                        points_file,
+                        points_shape,
+                        rgb_file,
+                        confidence_file,
+                        segmentation_file
                     ]
                     writer.writerow(row)
         

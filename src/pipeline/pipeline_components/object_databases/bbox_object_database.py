@@ -111,9 +111,10 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
                 if self.enable_same_mask_tracking:
                     self._update_object(mask_key, self.id_map[mask_key],segmented_pointcloud, embeddings_vector, description)
                 continue
-
-            centroid = segmented_pointcloud.mean(axis=0)
-            aabb = self._get_aabb(segmented_pointcloud)
+            
+            pointcloud = segmented_pointcloud.as_numpy()
+            centroid = pointcloud.mean(axis=0)
+            aabb = self._get_aabb(pointcloud)
             obj_id = self._match_object(centroid, aabb, embeddings_vector)
 
             if obj_id is None:

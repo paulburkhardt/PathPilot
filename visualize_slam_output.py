@@ -610,53 +610,41 @@ class SLAMOutputVisualizer:
                     # Load CSV format
                     import csv
                     objects = {}
-                    
                     with open(obj_map_file, 'r', newline='') as f:
                         reader = csv.DictReader(f)
                         for row in reader:
                             obj_id = int(row['object_id'])
-                            
                             # Parse mask IDs
                             mask_ids_str = row.get('mask_ids', '')
                             mask_ids = [int(x.strip()) for x in mask_ids_str.split(',') if x.strip()] if mask_ids_str else []
-                            
                             # Parse centroid
                             centroid = [
                                 float(row['centroid_x']),
                                 float(row['centroid_y']),
                                 float(row['centroid_z'])
                             ]
-                            
                             # Parse AABB
                             aabb = [
                                 float(row['aabb_min_x']), float(row['aabb_max_x']),
                                 float(row['aabb_min_y']), float(row['aabb_max_y']),
                                 float(row['aabb_min_z']), float(row['aabb_max_z'])
                             ]
-                            
                             # Parse cum_sum
                             cum_sum = [
                                 float(row['cum_sum_x']),
                                 float(row['cum_sum_y']),
                                 float(row['cum_sum_z'])
                             ]
-                            
-                            # Parse points_file if present
-                            points_file = row.get('points_file', None)
-                            if points_file is not None and points_file.strip() == '':
-                                points_file = None
-                            
-                            objects[str(obj_id)] = {
-                                'id': obj_id,
-                                'mask_ids': mask_ids,
-                                'centroid': centroid,
-                                'aabb': aabb,
-                                'cum_sum': cum_sum,
-                                'cum_len': int(row['cum_len']),
-                                'description': row.get('description', f'Object {obj_id}'),
-                                'points_file': points_file
-                            }
-                    
+                            # Build full object dictionary including all fields
+                            obj_dict = dict(row)
+                            obj_dict['id'] = obj_id
+                            obj_dict['mask_ids'] = mask_ids
+                            obj_dict['centroid'] = centroid
+                            obj_dict['aabb'] = aabb
+                            obj_dict['cum_sum'] = cum_sum
+                            obj_dict['cum_len'] = int(row['cum_len']) if row.get('cum_len') else 0
+                            # Optionally convert other fields as needed
+                            objects[str(obj_id)] = obj_dict
                     self.data['object_mapping'] = objects
                     print(f"Loaded object mapping with {len(objects)} objects from {obj_map_file}")
                     
@@ -1734,6 +1722,7 @@ class SLAMOutputVisualizer:
         
         # Visualize each object
         for i, (obj_id, obj_data) in enumerate(obj_map_data.items()):
+            print(f"obj_data for object {obj_id}: {obj_data}")
             obj_id = int(obj_id)
             color = object_colors[i % len(object_colors)]
             
@@ -1774,17 +1763,48 @@ class SLAMOutputVisualizer:
             
             # Log object points if points_file is present
             points_file = obj_data.get('points_file', None)
+            rgb_file = obj_data.get('rgb_file', None)
             if points_file is not None and Path(points_file).exists():
                 try:
                     obj_points = np.load(points_file)
+                    print(f"  Points for object {obj_id} loaded from {points_file} with shape {obj_points.shape}")
+                    obj_colors = None
+                    if rgb_file is not None and Path(rgb_file).exists():
+                        print(f"  Trying to load RGB file for object {obj_id}: {rgb_file}")
+                        obj_colors = np.load(rgb_file)
+                        print(f"  Loaded RGB array for object {obj_id} with shape {obj_colors.shape}, dtype: {obj_colors.dtype}, min: {obj_colors.min()}, max: {obj_colors.max()}")
+                        # Handle RGBA (4 channels)
+                        if obj_colors.shape[1] == 4:
+                            print(f"  RGB array for object {obj_id} has 4 channels, dropping alpha channel.")
+                            obj_colors = obj_colors[:, :3]
+                        # Handle BGR (if you know your data is BGR, swap here)
+                        # Uncomment if needed:
+                        # obj_colors = obj_colors[:, [2, 1, 0]]
+                        # Ensure uint8 and correct scaling
+                        if obj_colors.dtype != np.uint8:
+                            if obj_colors.max() <= 1.0:
+                                print(f"  Scaling float colors [0,1] to [0,255] for object {obj_id}")
+                                obj_colors = (obj_colors * 255).astype(np.uint8)
+                            else:
+                                print(f"  Converting float colors [0,255] to uint8 for object {obj_id}")
+                                obj_colors = obj_colors.astype(np.uint8)
+                        # Final debug print
+                        print(f"  Final obj_colors for object {obj_id}: shape {obj_colors.shape}, dtype: {obj_colors.dtype}, min: {obj_colors.min()}, max: {obj_colors.max()}")
+                        if obj_colors.shape[0] != obj_points.shape[0]:
+                            print(f"  Warning: rgb_file shape {obj_colors.shape} does not match points shape {obj_points.shape} for object {obj_id}")
+                            obj_colors = None
+                        else:
+                            print(f"  Loaded RGB colors for object {obj_id} from {rgb_file}")
+                    # Use config option to toggle between RGB and single color
+                    use_rgb = self.config.get('use_object_rgb_color', True)
                     rr.log(f"objects/object_{obj_id}/points", rr.Points3D(
                         positions=obj_points,
-                        colors=color,
+                        colors=obj_colors if (obj_colors is not None and use_rgb) else color,
                         radii=[0.01],
                         labels=[f"Object {obj_id} points"]
                     ), static=True)
                 except Exception as e:
-                    print(f"  Could not load points for object {obj_id} from {points_file}: {e}")
+                    print(f"  Could not load points/colors for object {obj_id} from {points_file} / {rgb_file}: {e}")
             
             print(f"  Object {obj_id}: {description} at {centroid}")
         
@@ -2292,6 +2312,9 @@ Note:
     parser.add_argument('--no-directional-warnings', action='store_true',
                        help='Disable directional warnings (show distance only)')
     
+    parser.add_argument('--no-object-rgb-color', action='store_true',
+                       help='Disable per-point RGB color for objects and use single color per object')
+    
     return parser.parse_args()
 
 
@@ -2330,7 +2353,8 @@ def main():
         'warning_distance_critical': args.warning_distance_critical,
         'warning_distance_strong': args.warning_distance_strong,
         'warning_distance_caution': args.warning_distance_caution,
-        'prefer_closest_points': args.prefer_closest_points
+        'prefer_closest_points': args.prefer_closest_points,
+        'use_object_rgb_color': not args.no_object_rgb_color
     }
     
     try:

@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from .abstract_data_entity import AbstractDataEntity
+from .point_cloud_data_entity import PointCloudDataEntity
+
  
 class ObjectDataEntity(AbstractDataEntity):
     def __init__(self, 
@@ -18,11 +20,13 @@ class ObjectDataEntity(AbstractDataEntity):
         self.mask_id = {mask_id}
         self.centroid = centroid
         self.description = description
-        self.aabb = self.get_aabb(points) # 6 Tupel - min_x,max_x,min_y,max_y,min_z,max_z
 
-        self.cum_sum = np.sum(points,axis= 0).astype(float) 
-        self.cum_len = points.shape[0]
-        self.original_len = points.shape[0]
+        points_3D = points.as_numpy()
+        self.aabb = self.get_aabb(points_3D) # 6 Tupel - min_x,max_x,min_y,max_y,min_z,max_z
+
+        self.cum_sum = np.sum(points_3D,axis= 0).astype(float) 
+        self.cum_len = points_3D.shape[0]
+        self.original_len = points_3D.shape[0]
 
         self.track_points = track_points
         if self.track_points:
@@ -37,9 +41,10 @@ class ObjectDataEntity(AbstractDataEntity):
         self.running_embedding_weight = running_embedding_weight
 
 
-    def update(self,mask_id,new_points, new_embedding, description):
+    def update(self,mask_id,new_point_cloud, new_embedding, description):
         self.mask_id.add(mask_id)
-        
+        new_points  = new_point_cloud.as_numpy()
+
         new_len = new_points.shape[0] 
         if new_len  > self.original_len:
             self.description = description
@@ -49,7 +54,7 @@ class ObjectDataEntity(AbstractDataEntity):
         self.cum_len += new_len
 
         if self.track_points:
-            self.points = np.vstack([self.points,new_points])
+            self.points = PointCloudDataEntity.vstack(self.points,new_point_cloud)
 
         self.centroid = self.cum_sum / self.cum_len
         self.aabb = self.update_aabb(self.aabb,self.get_aabb(new_points))
@@ -70,7 +75,7 @@ class ObjectDataEntity(AbstractDataEntity):
         self.cum_len += obj.cum_len
         
         if self.track_points:
-            self.points = np.vstack([self.points,obj.points])
+            self.points = PointCloudDataEntity.vstack(self.points,obj.points)
 
         self.centroid = self.cum_sum / self.cum_len
         self.aabb = self.update_aabb(self.aabb, obj.aabb) 
