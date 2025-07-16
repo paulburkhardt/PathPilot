@@ -74,11 +74,12 @@ pipeline:
     # Find closest points incrementally - waits for floor detection
     - type: IncrementalClosestPointFinderComponent
       config:
-        use_view_cone: true  # Set to true to enable view cone filtering
+        use_view_cone: True  # Set to true to enable view cone filtering
         cone_angle_deg: 90.0
         floor_distance_threshold: 0.12
-        use_segmentation_filter: True  # Enable filtering based on segmentation masks
-        use_object_segmentation_filter: False # either use_segmentation_filter or use_object_segmentation_filter
+        use_segmentation_filter: False  # Enable filtering based on segmentation masks
+        use_object_segmentation_filter: True # either use_segmentation_filter or use_object_segmentation_filter
+        use_centroids: False 
         n_closest_points: 4  # Number of closest points to return
         
     # Enhanced output writer with intermediate saving enabled

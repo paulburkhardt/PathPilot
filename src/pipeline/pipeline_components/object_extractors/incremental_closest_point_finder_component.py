@@ -32,7 +32,8 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                  floor_distance_threshold: float = 0.05,
                  n_closest_points: int = 20,
                  use_segmentation_filter: bool = True,
-                 use_object_segmentation_filter: bool = False
+                 use_object_segmentation_filter: bool = False,
+                 use_centroids: bool = False
                  ) -> None:
         super().__init__()
         self.use_view_cone = use_view_cone
@@ -41,6 +42,7 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         self.n_closest_points = n_closest_points
         self.use_segmentation_filter = use_segmentation_filter
         self.use_object_segmentation_filter  = use_object_segmentation_filter
+        self.use_centroids = use_centroids
         # Persistent mapping from segment ID to class label
         self.segment_id_to_class_mapping = {}
 
@@ -57,8 +59,9 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             inputs.extend(["image_segmentation_mask", "segmentation_labels"])
 
         if self.use_object_segmentation_filter:
-            inputs.extend(["objects","backround"])
-            
+            inputs.extend(["objects"])
+            if not self.use_centroids:
+                inputs.extend(["backround"])
         return inputs
     
 
@@ -341,29 +344,6 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                                         image_segmentation_mask,
                                         segmentation_labels)
         else:
-            # Generate outputs for background and each object
-            background_output = self.generate_output(
-                camera_pose,
-                backround,
-                floor_normal,
-                floor_offset,
-                step_nr,
-                point_cloud,
-                image_segmentation_mask,
-                segmentation_labels
-            )
-            object_outputs = [
-                self.generate_output(
-                    camera_pose,
-                    obj.points.as_numpy(),
-                    floor_normal,
-                    floor_offset,
-                    step_nr,
-                    point_cloud,
-                    image_segmentation_mask,
-                    segmentation_labels
-                ) for obj in objects
-            ]
 
             # Collect all closest points, indices, and distances, tagging with object index
             all_points = []
@@ -371,12 +351,62 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             all_distances = []
             all_object_indices = []
 
-            # Background (object_index = 0)
-            for i in range(len(background_output["n_closest_points_3d"])):
-                all_points.append(background_output["n_closest_points_3d"][i])
-                all_indices.append(background_output["n_closest_points_index"][i])
-                all_distances.append(background_output["n_closest_points_distance_2d"][i])
-                all_object_indices.append(0)
+            # Generate outputs for background and each object
+            if not self.use_centroids:
+                background_output = self.generate_output(
+                    camera_pose,
+                    backround.as_numpy(),
+                    floor_normal,
+                    floor_offset,
+                    step_nr,
+                    point_cloud,
+                    image_segmentation_mask,
+                    segmentation_labels
+                )
+                # Background (object_index = 0)
+                for i in range(len(background_output["n_closest_points_3d"])):
+                    all_points.append(background_output["n_closest_points_3d"][i])
+                    all_indices.append(background_output["n_closest_points_index"][i])
+                    all_distances.append(background_output["n_closest_points_distance_2d"][i])
+                    all_object_indices.append(0)
+
+
+                object_outputs = [
+                    self.generate_output(
+                        camera_pose,
+                        obj.points.as_numpy(),
+                        floor_normal,
+                        floor_offset,
+                        step_nr,
+                        point_cloud,
+                        image_segmentation_mask,
+                        segmentation_labels
+                    ) for obj in objects
+                ]
+            else:
+                # When using centroids, create a dummy background output for consistency
+                background_output = {
+                    "n_closest_points_3d": np.array([]),
+                    "n_closest_points_index": np.array([]),
+                    "n_closest_points_distance_2d": np.array([]),
+                    "floor_filtered_mask": np.array([]),
+                }
+                if self.use_view_cone:
+                    background_output["view_cone_mask"] = np.array([])
+
+                object_outputs = [
+                    self.generate_output(
+                        camera_pose,
+                        np.expand_dims(obj.centroid, axis=0) ,
+                        floor_normal,
+                        floor_offset,
+                        step_nr,
+                        point_cloud,
+                        image_segmentation_mask,
+                        segmentation_labels
+                    ) for obj in objects
+                ]
+
 
             # Objects (object_index = 1, 2, ...)
             for obj_idx, obj_output in enumerate(object_outputs, start=1):
@@ -617,14 +647,20 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
             n_closest_points = self.n_closest_points
         # Find the n closest points
         n_points = min(n_closest_points, len(current_points))
-        closest_indices = np.argpartition(distances_2d, n_points)[:n_points]
         
-        # Sort the closest indices by distance
-        sorted_closest_indices = closest_indices[np.argsort(distances_2d[closest_indices])]
+        # Fix: Handle the case where n_points equals the length of distances_2d
+        if n_points == len(distances_2d):
+            # If we want all points, just return them in sorted order
+            closest_indices = np.argsort(distances_2d)
+        else:
+            # Use argpartition for partial sorting
+            closest_indices = np.argpartition(distances_2d, n_points)[:n_points]
+            # Sort the closest indices by distance
+            closest_indices = closest_indices[np.argsort(distances_2d[closest_indices])]
         
         # Get the results (map back to original indices)
-        closest_points_3d = current_points[sorted_closest_indices]
-        closest_distances_2d = distances_2d[sorted_closest_indices]
-        closest_original_indices = current_indices[sorted_closest_indices]
+        closest_points_3d = current_points[closest_indices]
+        closest_distances_2d = distances_2d[closest_indices]
+        closest_original_indices = current_indices[closest_indices]
 
         return closest_points_3d,closest_original_indices, closest_distances_2d
