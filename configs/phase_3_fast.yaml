@@ -3,7 +3,7 @@ pipeline:
     # Load video data for SLAM processing
     - type: MAST3RSLAMVideoDataset
       config:
-        video_path:   data/videos/chair_trash_bag_cross.mp4        
+        video_path: data/videos/chair_trash_bag_cross.mp4
         mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/no_calib.yaml"
 
     # Run the yolo segmenter
@@ -29,33 +29,35 @@ pipeline:
     # Run MAST3R SLAM to generate point cloud and trajectory incrementally
     - type: MAST3RSLAMComponent
       config:
-        point_cloud_method: accumulating
+        point_cloud_method: refreshing
         c_confidence_threshold: 1.5 
         mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/no_calib.yaml"
         segment_point_cloud: True
 
-    # - type: PointCloudFilterSegmenter
-    #   config:
-    #     downsample_rate : 1
-    #     min_cluster_size: 1000
-    #     neighbor_distance:  0.05
-    #     ignore_backround: False 
+    - type: PointCloudFilterSegmenter
+      config:
+        downsample_rate : 4
+        min_cluster_size: 250
+        neighbor_distance:  0.05
+        ignore_backround: False 
 
-    # - type: ImageEmbeddingSegmenter
-    #   config:
-    #     text: "Describe the object: " # the prompt to generat
+    - type: ImageEmbeddingSegmenter
+      config:
+        text: "Describe the object: " # the prompt to generat
+        max_tokens: 4
+        add_description: True
 
 
-    # - type: BBoxObjectDatabase
-    #   config: 
-    #     match_threshold : 0.25 # the higher the more matching happens
-    #     embedding_weight : 0.5 # interpolation weight between geometric distance and similar. Higher value means similarity is more important
-    #     running_embedding_weight  :  0.7 # how the running embedding get updated. higher value -> gets lets changed by new similar image
-    #     knn_count  :  4 # controls how many options there are 
-    #     use_blip  :  True # look if images are similar
-    #     use_fusion  :  False # to join existing objects if needed # implemented but not tested for a while
-    #     enable_same_mask_tracking : False # leave at false. this is for yolo and accumulating mode of Mast3r-slam important
-    #     track_points: True # the pointclouds are actually not needed, but for nice visualisation i intregated it
+    - type: BBoxObjectDatabase
+      config: 
+        match_threshold : 0.3 #
+        embedding_weight : 0.5
+        running_embedding_weight  :  0.7 
+        knn_count  :  4
+        use_blip  :  True 
+        use_fusion  :  False
+        enable_same_mask_tracking : False
+        track_points: False
 
 
 
@@ -74,12 +76,12 @@ pipeline:
     # Find closest points incrementally - waits for floor detection
     - type: IncrementalClosestPointFinderComponent
       config:
-        use_view_cone: True  # Set to true to enable view cone filtering
+        use_view_cone: true  # Set to true to enable view cone filtering
         cone_angle_deg: 90.0
         floor_distance_threshold: 0.12
-        use_segmentation_filter: True  # Enable filtering based on segmentation masks
-        use_object_segmentation_filter: False # either use_segmentation_filter or use_object_segmentation_filter
-        use_centroids: False 
+        use_segmentation_filter: False  # Enable filtering based on segmentation masks
+        use_object_segmentation_filter: True # either use_segmentation_filter or use_object_segmentation_filter
+        use_centroids: True   #extra option for use_object_segmentation_filter
         n_closest_points: 4  # Number of closest points to return
         
     # Enhanced output writer with intermediate saving enabled

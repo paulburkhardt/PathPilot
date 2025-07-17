@@ -78,7 +78,6 @@ class BBoxObjectDatabase(AbstractObjectDatabase):
             NotImplementedError: As this is currently a placeholder
         """
 
-
         if key_frame_flag:
             self.add_frame(object_point_cloud, embeddings, descriptions, segmentation_labels )
 
