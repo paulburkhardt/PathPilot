@@ -394,10 +394,23 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                 if self.use_view_cone:
                     background_output["view_cone_mask"] = np.array([])
 
+                # object_outputs = [
+                #     self.generate_output(
+                #         camera_pose,
+                #         np.expand_dims(obj.centroid, axis=0) ,
+                #         floor_normal,
+                #         floor_offset,
+                #         step_nr,
+                #         point_cloud,
+                #         image_segmentation_mask,
+                #         segmentation_labels
+                #     ) for obj in objects
+                # ]
+
                 object_outputs = [
                     self.generate_output(
                         camera_pose,
-                        np.expand_dims(obj.centroid, axis=0) ,
+                        np.expand_dims(self.closest_distance_to_aabb(camera_pose, obj.aabb), axis=0) ,
                         floor_normal,
                         floor_offset,
                         step_nr,
@@ -406,7 +419,6 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
                         segmentation_labels
                     ) for obj in objects
                 ]
-
 
             # Objects (object_index = 1, 2, ...)
             for obj_idx, obj_output in enumerate(object_outputs, start=1):
@@ -664,3 +676,31 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         closest_original_indices = current_indices[closest_indices]
 
         return closest_points_3d,closest_original_indices, closest_distances_2d
+    
+
+    def closest_distance_to_aabb(self, camera_pose, aabb):
+        """
+        p: numpy array (px, py, pz)
+        aabb: tuple (min_x, max_x, min_y, max_y, min_z, max_z)
+        returns: float, closest distance to AABB surface (0 if inside)
+        """
+        p = self._get_camera_position(camera_pose)
+        min_x, max_x, min_y, max_y, min_z, max_z = aabb
+
+        inside = (min_x <= p[0] <= max_x) and \
+                (min_y <= p[1] <= max_y) and \
+                (min_z <= p[2] <= max_z)
+
+        if inside:
+            # Add a small epsilon vector to avoid zero-length vector issues
+            epsilon = np.array([1e-8, 1e-8, 1e-8])
+            return p + epsilon
+
+        # Outside: clamp and compute distance
+        cx = np.clip(p[0], min_x, max_x)
+        cy = np.clip(p[1], min_y, max_y)
+        cz = np.clip(p[2], min_z, max_z)
+        closest_point = np.array([cx, cy, cz])
+
+        return closest_point
+        

@@ -3,7 +3,7 @@ pipeline:
     # Load video data for SLAM processing
     - type: MAST3RSLAMVideoDataset
       config:
-        video_path:   data/videos/chair_trash_bag_cross.mp4        
+        video_path:   Data/Videos/two_chairs_and_trash.mp4        
         mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/no_calib.yaml"
 
     # Run the yolo segmenter
@@ -48,7 +48,7 @@ pipeline:
 
     - type: BBoxObjectDatabase
       config: 
-        match_threshold : 0.25 # the higher the more matching happens
+        match_threshold : 0.3 # the higher the more matching happens
         embedding_weight : 0.5 # interpolation weight between geometric distance and similar. Higher value means similarity is more important
         running_embedding_weight  :  0.7 # how the running embedding get updated. higher value -> gets lets changed by new similar image
         knn_count  :  4 # controls how many options there are 

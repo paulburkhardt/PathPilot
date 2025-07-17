@@ -52,6 +52,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                  intermediate_interval: int = 10,
                  create_timestamped_dir: bool = True,
                  analysis_format: str = 'json',
+                 save_segmentation_labels: bool = True,
                  save_closest_points_segment_ids: bool = True) -> None:
         super().__init__(output_dir)
         self.output_name = output_name
@@ -66,6 +67,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         self.create_timestamped_dir = create_timestamped_dir
         self.analysis_format = analysis_format.lower()
         self.save_closest_points_segment_ids = save_closest_points_segment_ids
+        self.save_segmentation_labels = save_segmentation_labels
         
         if self.analysis_format not in ['json', 'csv']:
             raise ValueError("analysis_format must be 'json' or 'csv'")
@@ -116,7 +118,8 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
         if self.save_yolo_detections:
             inputs.append("yolo_detections")
         # Always try to get segmentation labels if available
-        inputs.append("segmentation_labels")
+        if self.save_segmentation_labels:
+            inputs.append("segmentation_labels")
         # Floor data, closest points, YOLO detections, and segmentation labels are optional and will be handled via optional_inputs
             
         return inputs
