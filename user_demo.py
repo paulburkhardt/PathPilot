@@ -93,11 +93,15 @@ class SpatialAIManager:
         """
 
         # Convert the dataset to a list of dicts matching the required structure
-        objects_as_text = "\n".join([
-            "{closest_3d_x: "+ str(row.closest_3d_x) + ", closest_3d_y: "+ str(row.closest_3d_y)+ ", closest_3d_z: "+ str(row.closest_3d_z)+ ", closest_2d_distance: " + str(row.closest_2d_distance) + ", class_label: " +str(row.class_label) + "}"
-            for _,row in objects.iterrows()
-        ])
-        camera_pose_as_text = "{position: "+ str(camera_pose.position.tolist())+", quaternion: "+ str(camera_pose.rotation.as_quat().tolist()) + " }"
+        objects_as_text = "[]"
+        if len(objects):
+            objects_as_text = "\n".join([
+                "{closest_3d_x: "+ str(row.closest_3d_x) + ", closest_3d_y: "+ str(row.closest_3d_y)+ ", closest_3d_z: "+ str(row.closest_3d_z)+ ", closest_2d_distance: " + str(row.closest_2d_distance) + ", class_label: " +str(row.class_label) + "}"
+                for _,row in objects.iterrows()
+            ])
+        camera_pose_as_text = "{}"
+        if camera_pose is not None:
+            camera_pose_as_text = "{position: "+ str(camera_pose.position.tolist())+", quaternion: "+ str(camera_pose.rotation.as_quat().tolist()) + " }"
 
         print("Asking Spatial AI...")
         output = "Dummy output"
