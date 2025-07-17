@@ -85,7 +85,7 @@ class ImageDataSegmenter(AbstractDataSegmenter):
         # Tracking state
         self.last_detection_frame = -detection_interval
         self.track_history = defaultdict(int)  # Track lifetime of objects
-        self.if_first_frame = False
+        self.if_not_first_frame = False
         self.masks = {}
         self.previous_masks = {}
 
@@ -124,6 +124,7 @@ class ImageDataSegmenter(AbstractDataSegmenter):
         elif rgb_image.dtype != np.uint8:
             rgb_image = np.clip(rgb_image, 0, 255).astype(np.uint8)
             
+        bboxes, class_labels = [], []
         # Check if we should initialize tracking with new YOLO detections
         if (step_nr - self.last_detection_frame >= self.detection_interval and 
             yolo_detections and len(yolo_detections) > 0):
@@ -134,9 +135,12 @@ class ImageDataSegmenter(AbstractDataSegmenter):
                 self._initialize_tracking(rgb_image, bboxes, class_labels)
                 self.last_detection_frame = step_nr
 
+        if not bboxes and not self.if_not_first_frame:
+            self.masks = {}
+        else:
         # Propagate masks to current frame
-        self.masks = self._propagate_masks(rgb_image)
-        # self.masks = self.match_new_masks(self.masks)
+            self.masks = self._propagate_masks(rgb_image)
+            # self.masks = self.match_new_masks(self.masks)
 
         
         #transfer the multiple segmentation masks into a single one
@@ -372,9 +376,9 @@ class ImageDataSegmenter(AbstractDataSegmenter):
     def _initialize_tracking(self, frame, bboxes, class_labels):
         """Initialize tracking with YOLO bounding boxes"""
         # Reset inference state
-        if not self.if_first_frame:
+        if not self.if_not_first_frame:
             self.predictor.load_first_frame(frame)
-            self.if_first_frame = True
+            self.if_not_first_frame = True
             frame_idx = 0
         else: 
             self.predictor.reset_state()
