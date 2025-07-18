@@ -22,7 +22,8 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
                 min_cluster_size: int = 100,
                 neighbor_distance:  float = 0.05,
                 ignore_backround : bool = True,
-                rewrite_pointcloud: bool = False 
+                rewrite_pointcloud: bool = False,
+                do_DBSCAN: bool = True
                 ) -> None:
         super().__init__()
         self.downsample_rate = downsample_rate # needs to be int
@@ -31,6 +32,7 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         self.ignore_backround = ignore_backround
         self.rewrite_pointcloud = rewrite_pointcloud
         self.backround = None
+        self.do_DBSCAN = do_DBSCAN
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -90,20 +92,27 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
 
             # Remove all-zero points
             if len(points) > 0:
-                db = DBSCAN(eps= self.neighbor_distance, min_samples=5).fit(points[:,:3])
-                labels = db.labels_
-                unique_labels, label_counts = np.unique(labels[labels != -1], return_counts=True)
-                valid_labels = unique_labels[label_counts >= self.min_cluster_size]
-                mask = np.isin(labels, valid_labels)
-                filtered_points = points[mask]
+                if self.do_DBSCAN:
+
+                    db = DBSCAN(eps= self.neighbor_distance, min_samples=5).fit(points[:,:3])
+                    labels = db.labels_
+                    unique_labels, label_counts = np.unique(labels[labels != -1], return_counts=True)
+                    valid_labels = unique_labels[label_counts >= self.min_cluster_size]
+                    mask = np.isin(labels, valid_labels)
+                    filtered_points = points[mask]
 
 
-                if len(filtered_points) > 0:
-                    obj_ids_col = np.full((filtered_points.shape[0], 1), obj_id)
-                    filtered_points_together = np.hstack([filtered_points, obj_ids_col])
-                    object_pointclouds[int(obj_id)]= self.create_pointcloud_entity(filtered_points)
-                    # Re-attach the object id as last column for each point
-                    all_points.append(filtered_points_together)
+                    if len(filtered_points) > 0:
+                        obj_ids_col = np.full((filtered_points.shape[0], 1), obj_id)
+                        filtered_points_together = np.hstack([filtered_points, obj_ids_col])
+                        object_pointclouds[int(obj_id)]= self.create_pointcloud_entity(filtered_points)
+                        # Re-attach the object id as last column for each point
+                        all_points.append(filtered_points_together)
+                else: 
+                    object_pointclouds[int(obj_id)]= self.create_pointcloud_entity(arr)
+                    all_points.append(arr)
+
+
 
         combined_pointcloud = None
         if self.rewrite_pointcloud and all_points:

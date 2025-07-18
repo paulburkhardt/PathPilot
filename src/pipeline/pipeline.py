@@ -3,6 +3,7 @@ from .pipeline_data_bucket import PipelineDataBucket
 from .pipeline_components.abstract_pipeline_component import AbstractPipelineComponent
 
 from tqdm import tqdm
+import time
 
 class Pipeline:
     """
@@ -57,9 +58,8 @@ class Pipeline:
         """
         
         dataset_component = self.components[0]
-        
         for i in tqdm(range(len(dataset_component)), desc="Processing dataset"):
-
+            start_time = time.time()
             data_entity = dataset_component[i]
 
             bucket = PipelineDataBucket()
@@ -70,7 +70,9 @@ class Pipeline:
             })
 
             for component in self.components[1:]:
-
+                step_start_time = time.time()
                 inputs = bucket.get(*component.inputs_from_bucket)
                 outputs = component(**inputs)
                 bucket.put(outputs)
+                print(f"[Timing] Component {i} - {component.__class__.__name__} took {time.time() - step_start_time:.2f} seconds")
+            print(f"[Timing] Step run took {time.time() - start_time:.2f} seconds in total.")

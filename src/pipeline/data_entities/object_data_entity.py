@@ -63,6 +63,11 @@ class ObjectDataEntity(AbstractDataEntity):
             self.running_embedding =  self.running_embedding_weight * self.running_embedding + (1 - self.running_embedding_weight) * new_embedding
             self.running_embedding = F.normalize(self.running_embedding, p=2, dim=-1) 
             self.embeddings = torch.vstack([self.embeddings,new_embedding])
+        else: 
+            self.running_embedding = new_embedding
+            self.running_embedding = F.normalize(self.running_embedding, p=2, dim=-1) 
+            self.embeddings = new_embedding
+
 
     def fuse(self, obj):
         self.mask_id.update(obj.mask_id)

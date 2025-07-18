@@ -26,6 +26,7 @@ data/*
 enhanced_slam_outputs/
 *.json
 
+evaluation/
 segment_anything_2/
 sam2/
 MASt3R-SLAM/

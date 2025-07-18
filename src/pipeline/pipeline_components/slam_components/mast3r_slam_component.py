@@ -274,7 +274,8 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         c_confidence_threshold: float,
         mast3r_slam_config_path: str, 
         device: str = "cuda:0", 
-        segment_point_cloud: bool = True
+        segment_point_cloud: bool = True,
+        only_keyframes: bool = False
         )->None:
 
         super().__init__()
@@ -283,6 +284,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         self.device = device
         self.c_confidence_threshold = c_confidence_threshold
         self.segment_point_cloud = segment_point_cloud
+        self.only_keyframes = only_keyframes
 
         assert point_cloud_method in ["accumulating", "refreshing"], "point_cloud_method must be either 'accumulating' or 'refreshing'"
         self.point_cloud_method = point_cloud_method
@@ -502,7 +504,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                 segmentation_masks = np.concatenate(segmentation_masks,axis=0)
 
         #update the pointcloud with every frame, but only have parts of the color
-        elif self.point_cloud_method == "refreshing":
+        elif self.point_cloud_method == "refreshing" and ( not self.only_keyframes or (self.only_keyframesand and key_frame_flag)):
 
             # if self.segment_point_cloud:
             #     raise NotImplementedError("segmentation currently only available for accumulating mode.")
