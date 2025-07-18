@@ -1,13 +1,31 @@
 import gradio as gr
 import os
-
+from pathlib import Path
 from main_manager import MainManager
+
+
+# Hardcoded base directory
+BASE_DIR = r"C:\Users\nick\OneDrive\Dokumente\Studium\TUM\Master\Semester2\AppliedFoundationModels\work\PathPilot\Data"
+
 
 def validate_directory(path):
     if os.path.isdir(path):
         return f"✅ Valid directory: {os.path.abspath(path)}"
     else:
         return "❌ Invalid directory path. Please try again."
+    
+def find_incremental_dirs(base_path):
+    results = []
+    try:
+        for run_dir in os.listdir(base_path):
+            run_path = os.path.join(base_path, run_dir)
+            if os.path.isdir(run_path) and run_dir.startswith("run_"):
+                for sub in os.listdir(run_path):
+                    if sub.startswith("incremental_analysis_detailed_"):
+                        results.append(os.path.join(BASE_DIR,run_dir, sub))
+        return sorted(results)
+    except Exception as e:
+        return [f"Error: {str(e)}"]
 
 def main():
     manager = MainManager()
@@ -22,7 +40,14 @@ def main():
             video_file = gr.File(label="Upload MP4 Video")
             
             with gr.Column():
-                data_dir = gr.Textbox(label="Enter full path to directory")
+                dir_choices = find_incremental_dirs(BASE_DIR)
+                data_dir = gr.Dropdown(
+                    label="Select run + incremental analysis directory",
+                    choices=dir_choices,
+                    value=dir_choices[0] if dir_choices else None,
+                    interactive=True
+                )
+
                 submit_btn = gr.Button("Submit")
                 feedback = gr.Markdown("")  # Visual feedback placeholder
 
