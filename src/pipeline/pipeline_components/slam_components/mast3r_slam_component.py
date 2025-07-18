@@ -14,12 +14,8 @@ import lietorch
 import numpy as np
 import PIL
 
-from .mast3r_slam_component_utils.shared_keyframes import SharedKeyframes
-from .mast3r_slam_component_utils.frame import create_frame
-
-
-#from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
-from mast3r_slam.frame import Mode, SharedStates
+# Import MASt3R SLAM components
+from mast3r_slam.frame import Mode, SharedKeyframes, SharedStates, create_frame
 from mast3r_slam.mast3r_utils import (
     load_mast3r,
     load_retriever,
@@ -30,7 +26,6 @@ from mast3r_slam.tracker import FrameTracker
 from mast3r_slam.global_opt import FactorGraph
 from mast3r_slam.config import load_config, config, set_global_config
 from mast3r_slam.geometry import constrain_points_to_ray
-
 
 from src.pipeline.data_entities.image_data_entity import ImageDataEntity
 from src.pipeline.data_entities.point_cloud_data_entity import PointCloudDataEntity
@@ -322,7 +317,14 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
         inits the stuff that is dataset parameter dependent
         """
 
-        self.keyframes = SharedKeyframes(self.manager,img_height, img_width)
+        if self.segment_point_cloud:
+            # Use custom SharedKeyframes for segmentation
+            from .mast3r_slam_component_utils.shared_keyframes import SharedKeyframes as CustomSharedKeyframes
+            self.keyframes = CustomSharedKeyframes(self.manager,img_height, img_width)
+        else:
+            # Use original MASt3R SLAM SharedKeyframes
+            self.keyframes = SharedKeyframes(self.manager,img_height, img_width)
+            
         self.states = SharedStates(self.manager, img_height, img_width)
 
         self.model = load_mast3r(device=self.device,path="MASt3R-SLAM/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth" )
@@ -396,15 +398,21 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             else self.states.get_frame().T_WC
         )
 
-        #frame = create_frame(step_nr, image.as_numpy(), T_WC, img_size=image_size, device=self.device)
-        frame = create_frame(
-            step_nr, 
-            image.as_numpy(), 
-            T_WC, 
-            img_size=image_size, 
-            device=self.device,
-            img_segmentation_mask= image_segmentation_mask
-        )
+        # Create frame based on segmentation flag
+        if self.segment_point_cloud:
+            # Use custom frame creation with segmentation
+            from .mast3r_slam_component_utils.frame import create_frame as create_custom_frame
+            frame = create_custom_frame(
+                step_nr, 
+                image.as_numpy(), 
+                T_WC, 
+                img_size=image_size, 
+                device=self.device,
+                img_segmentation_mask=image_segmentation_mask
+            )
+        else:
+            # Use original MASt3R SLAM frame creation
+            frame = create_frame(step_nr, image.as_numpy(), T_WC, img_size=image_size, device=self.device)
 
 
 
@@ -527,13 +535,20 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                 
 
 
-
-        point_cloud_data_entity = PointCloudDataEntity(
-            point_cloud=pointclouds, #pointcloud in world coordinates
-            rgb= colors,
-            confidence_scores=confidence_scores,
-            segmentation_mask = segmentation_masks
-        )
+        # Create PointCloudDataEntity based on segmentation flag
+        if self.segment_point_cloud:
+            point_cloud_data_entity = PointCloudDataEntity(
+                point_cloud=pointclouds, #pointcloud in world coordinates
+                rgb= colors,
+                confidence_scores=confidence_scores,
+                segmentation_mask = segmentation_masks
+            )
+        else:
+            point_cloud_data_entity = PointCloudDataEntity(
+                point_cloud=pointclouds, #pointcloud in world coordinates
+                rgb= colors,
+                confidence_scores=confidence_scores
+            )
 
         return {
             "point_cloud": point_cloud_data_entity,

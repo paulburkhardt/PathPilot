@@ -107,11 +107,10 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             if self.save_closest_points_segment_ids:
                 inputs.append("n_closest_points_segment_ids")
                 inputs.append("n_closest_points_class_labels")
+                inputs.append("segmentation_labels")
+
         if self.save_yolo_detections:
             inputs.append("yolo_detections")
-        # Always try to get segmentation labels if available
-        inputs.append("segmentation_labels")
-        # Floor data, closest points, YOLO detections, and segmentation labels are optional and will be handled via optional_inputs
             
         return inputs
     
@@ -258,7 +257,9 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
             results["closest_points_path"] = str(closest_path)
             
             # Save closest points with segment IDs if segment IDs are available
-            if any(segment_ids is not None for segment_ids in self.accumulated_n_closest_points_segment_ids):
+            if (self.save_closest_points_segment_ids and 
+                hasattr(self, 'accumulated_n_closest_points_segment_ids') and
+                any(segment_ids is not None for segment_ids in self.accumulated_n_closest_points_segment_ids)):
                 closest_objects_path = self._save_closest_objects_csv()
                 results["closest_objects_path"] = str(closest_objects_path)
         
@@ -792,7 +793,7 @@ class EnhancedSLAMOutputWriter(AbstractDataWriter):
                 "trajectory_duration": (max(self.accumulated_timestamps) - min(self.accumulated_timestamps)) if len(self.accumulated_timestamps) > 1 else 0,
                 "has_floor_data": self.floor_data is not None,
                 "n_closest_points_3d_count": len(self.accumulated_n_closest_points_distances),
-                "n_closest_points_with_segment_ids_count": sum(1 for segment_ids in self.accumulated_n_closest_points_segment_ids if segment_ids is not None),
+                "n_closest_points_with_segment_ids_count": sum(1 for segment_ids in self.accumulated_n_closest_points_segment_ids if segment_ids is not None) if hasattr(self, 'accumulated_n_closest_points_segment_ids') else 0,
                 "n_closest_points_with_class_labels_count": sum(1 for class_labels in self.accumulated_n_closest_points_class_labels if class_labels is not None) if hasattr(self, 'accumulated_n_closest_points_class_labels') else 0,
                 "yolo_detections_count": len(self.accumulated_yolo_detections),
                 "segmentation_labels_count": len(self.accumulated_segmentation_labels)

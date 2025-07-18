@@ -454,7 +454,24 @@ class IncrementalClosestPointFinderComponent(AbstractPipelineComponent):
         
         # Find the n closest points
         n_points = min(self.n_closest_points, len(current_points))
-        closest_indices = np.argpartition(distances_2d, n_points)[:n_points]
+        if n_points == 0:
+            # No points available after filtering
+            outputs = {
+                "n_closest_points_3d": np.empty((0, 3), dtype=float),
+                "n_closest_points_index": np.empty((0,), dtype=int),
+                "n_closest_points_distance_2d": np.empty((0,), dtype=float),
+                "floor_filtered_mask": floor_filtered_mask,
+            }
+            if self.use_view_cone:
+                outputs["view_cone_mask"] = view_cone_mask_full
+            self._add_segmentation_outputs(outputs)
+            return outputs
+        elif n_points >= len(distances_2d):
+            # All points are closest points, no need for argpartition
+            closest_indices = np.arange(len(distances_2d))
+        else:
+            # Use argpartition when we have more points than needed
+            closest_indices = np.argpartition(distances_2d, n_points)[:n_points]
         
         # Sort the closest indices by distance
         sorted_closest_indices = closest_indices[np.argsort(distances_2d[closest_indices])]
