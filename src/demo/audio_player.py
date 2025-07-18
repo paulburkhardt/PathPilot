@@ -173,6 +173,9 @@ class AudioPlayer:
                 
         finally:
             # Clean up temp file
+            # Explicitly stop and unload the mixer
+            pygame.mixer.music.stop()
+            pygame.mixer.music.unload()
             try:
                 os.remove(temp_mp3)
             except Exception:

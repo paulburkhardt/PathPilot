@@ -105,11 +105,9 @@
             "name": "Python Debugger: user demo",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/user_demo.py",
+            "program": "${workspaceFolder}/src/demo/main.py",
             "console": "integratedTerminal",
             "args": [
-                "Data/Videos/two_chairs_and_trash.mp4",
-                "Data/run_44/incremental_analysis_detailed_20250714_115932",
             ],
             "justMyCode": false
         },
