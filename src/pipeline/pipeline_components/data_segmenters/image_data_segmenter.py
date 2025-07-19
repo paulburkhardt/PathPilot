@@ -133,8 +133,10 @@ class ImageDataSegmenter(AbstractDataSegmenter):
                 self._initialize_tracking(rgb_image, bboxes, class_labels)
                 self.last_detection_frame = step_nr
 
-        # Propagate masks to current frame
-        self.masks = self._propagate_masks(rgb_image)
+        # Only propagate masks if tracking has been initialized
+        if self.if_first_frame:
+            self.masks = self._propagate_masks(rgb_image)
+        # Otherwise, keep the previous masks to maintain synchronization
         
         #transfer the multiple segmentation masks into a single one
         segmentation_mask = np.zeros(rgb_image.shape[0:2],dtype=np.int32)

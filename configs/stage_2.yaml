@@ -3,7 +3,7 @@ pipeline:
     # Load video data for SLAM processing
     - type: MAST3RSLAMVideoDataset
       config:
-        video_path: Data/Videos/two_chairs_and_trash.mp4
+        video_path: Data/Videos/back_and_forth.mp4
         mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/no_calib.yaml"
 
     # Run the yolo segmenter
@@ -48,8 +48,8 @@ pipeline:
     # Find closest points incrementally - waits for floor detection
     - type: IncrementalClosestPointFinderComponent
       config:
-        use_view_cone: true  # Set to true to enable view cone filtering
-        cone_angle_deg: 90.0
+        use_view_cone: false  # Set to true to enable view cone filtering
+        cone_angle_deg: 45.0
         use_segmentation_filter: true  # Enable filtering based on segmentation masks
         n_closest_points: 20  # Number of closest points to return
         

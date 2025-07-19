@@ -177,9 +177,15 @@ class SLAMOutputVisualizer:
                             np.asarray(plydata.elements[0]["green"]),
                             np.asarray(plydata.elements[0]["blue"])]
                             ,1),
-                        "classIds": np.asarray(plydata.elements[0]["segmentation"]),
                         "is_temporal": False
                     }
+                    
+                    # Only add segmentation if the field exists
+                    try:
+                        point_cloud_data["classIds"] = np.asarray(plydata.elements[0]["segmentation"])
+                    except ValueError:
+                        # Segmentation field not available
+                        point_cloud_data["classIds"] = None
                     self.data['point_cloud'] = point_cloud_data
 
                 except ImportError:
@@ -244,9 +250,15 @@ class SLAMOutputVisualizer:
                         np.asarray(plydata.elements[0]["red"]),
                         np.asarray(plydata.elements[0]["green"]),
                         np.asarray(plydata.elements[0]["blue"])]
-                        ,1),
-                    "classIds": np.asarray(plydata.elements[0]["segmentation"])
+                        ,1)
                 }
+                
+                # Only add segmentation if the field exists
+                try:
+                    point_cloud_data["classIds"] = np.asarray(plydata.elements[0]["segmentation"])
+                except ValueError:
+                    # Segmentation field not available
+                    point_cloud_data["classIds"] = None
 
                 
                 #try:
@@ -302,7 +314,7 @@ class SLAMOutputVisualizer:
                 if 'red' in line or 'green' in line or 'blue' in line:
                     has_colors = True
                 if "segmentation" in line:
-                    has_classIds= True
+                    has_classIds = True
             elif line.startswith('end_header'):
                 data_start = i + 1
                 break
@@ -318,9 +330,13 @@ class SLAMOutputVisualizer:
                 if has_colors and len(values) >= 6:
                     colors.append([int(values[3]), int(values[4]), int(values[5])])
         
-                # Extract class Ids if available
-                if has_classIds and len(values)>=7:
-                    classIds.append(int(values[6]))
+                        # Extract class Ids if available
+        if has_classIds and len(values)>=7:
+            try:
+                classIds.append(int(values[6]))
+            except (ValueError, IndexError):
+                # Skip if segmentation value is invalid
+                pass
 
         return {
             'points': np.array(points),
@@ -434,6 +450,11 @@ class SLAMOutputVisualizer:
                         print(f"Warning: Missing columns in closest objects CSV: {missing_columns}")
                         continue
                     
+                    # Check if class_label column is available
+                    has_class_labels = 'class_label' in df.columns
+                    if has_class_labels:
+                        print("Found class_label column in closest objects data")
+                    
                     # Group by step and aggregate closest objects data
                     objects_by_step = {}
                     for _, row in df.iterrows():
@@ -442,21 +463,25 @@ class SLAMOutputVisualizer:
                             objects_by_step[step] = {
                                 'points': [],
                                 'distances': [],
-                                'segment_ids': []
+                                'segment_ids': [],
+                                'class_labels': []
                             }
                         
                         point = [row['closest_3d_x'], row['closest_3d_y'], row['closest_3d_z']]
                         distance = row['closest_2d_distance']
                         segment_id = int(row['segment_id'])
+                        class_label = row['class_label'] if has_class_labels else "unknown"
                         
                         objects_by_step[step]['points'].append(point)
                         objects_by_step[step]['distances'].append(distance)
                         objects_by_step[step]['segment_ids'].append(segment_id)
+                        objects_by_step[step]['class_labels'].append(class_label)
                     
                     # Convert to arrays for visualization compatibility
                     points_3d = []
                     distances = []
                     segment_ids = []
+                    class_labels = []
                     steps = []
                     
                     for step in sorted(objects_by_step.keys()):
@@ -464,12 +489,14 @@ class SLAMOutputVisualizer:
                         points_3d.append(step_data['points'])
                         distances.append(step_data['distances'])
                         segment_ids.append(step_data['segment_ids'])
+                        class_labels.append(step_data['class_labels'])
                         steps.append(step)
                     
                     self.data['closest_points'] = {
                         'points_3d': np.array(points_3d, dtype=object),
                         'distances': np.array(distances, dtype=object),
                         'segment_ids': np.array(segment_ids, dtype=object),  # New: segment IDs
+                        'class_labels': np.array(class_labels, dtype=object),  # New: class labels
                         'steps': np.array(steps),
                         'data_type': 'objects',  # New: mark as objects data
                         'summary': {
@@ -977,6 +1004,7 @@ class SLAMOutputVisualizer:
             distances = closest_data['distances']
             steps = closest_data.get('steps', None)
             segment_ids = closest_data.get('segment_ids', None)  # New: segment IDs
+            class_labels = closest_data.get('class_labels', None)  # New: class labels
             
             # If we have step information, map data to trajectory poses
             if steps is not None:
@@ -986,6 +1014,7 @@ class SLAMOutputVisualizer:
                 mapped_points = [None] * num_poses
                 mapped_distances = [None] * num_poses
                 mapped_segment_ids = [None] * num_poses  # New: segment IDs mapping
+                mapped_class_labels = [None] * num_poses  # New: class labels mapping
                 
                 # Map data based on step indices
                 for i, step in enumerate(steps):
@@ -996,11 +1025,16 @@ class SLAMOutputVisualizer:
                         # Map segment IDs if available
                         if segment_ids is not None and len(segment_ids[i]) > 0:
                             mapped_segment_ids[step] = segment_ids[i][0]  # First segment ID
+                        
+                        # Map class labels if available
+                        if class_labels is not None and len(class_labels[i]) > 0:
+                            mapped_class_labels[step] = class_labels[i][0]  # First class label
                 
                 # Fill missing data with None or default values
                 final_points = []
                 final_distances = []
                 final_segment_ids = []
+                final_class_labels = []
                 valid_mask = []
                 
                 for i in range(num_poses):
@@ -1008,12 +1042,14 @@ class SLAMOutputVisualizer:
                         final_points.append(mapped_points[i])
                         final_distances.append(mapped_distances[i])
                         final_segment_ids.append(mapped_segment_ids[i])
+                        final_class_labels.append(mapped_class_labels[i])
                         valid_mask.append(True)
                     else:
                         # Use trajectory position as fallback for missing data
                         final_points.append(self.data['trajectory']['positions'][i])
                         final_distances.append(0.0)
                         final_segment_ids.append(-1)  # -1 indicates no segment data
+                        final_class_labels.append("unknown")  # Default class label
                         valid_mask.append(False)
                 
                 result = {
@@ -1023,10 +1059,11 @@ class SLAMOutputVisualizer:
                     'data_type': data_type
                 }
                 
-                # Add segment IDs if available
+                # Add segment IDs and class labels if available
                 if data_type == 'objects':
                     result['segment_ids'] = np.array(final_segment_ids)
-                    print(f"Mapped segment IDs available for visualization")
+                    result['class_labels'] = np.array(final_class_labels)
+                    print(f"Mapped segment IDs and class labels available for visualization")
                 
                 return result
             
@@ -1045,6 +1082,7 @@ class SLAMOutputVisualizer:
                 first_closest_points = []
                 first_distances = []
                 first_segment_ids = []
+                first_class_labels = []
                 
                 for i in range(len(points_3d)):
                     if len(points_3d[i]) > 0:
@@ -1054,11 +1092,16 @@ class SLAMOutputVisualizer:
                             first_segment_ids.append(segment_ids[i][0])
                         else:
                             first_segment_ids.append(-1)
+                        if class_labels is not None and len(class_labels[i]) > 0:
+                            first_class_labels.append(class_labels[i][0])
+                        else:
+                            first_class_labels.append("unknown")
                     else:
                         # Use trajectory position as fallback
                         first_closest_points.append(self.data['trajectory']['positions'][i])
                         first_distances.append(0.0)
                         first_segment_ids.append(-1)
+                        first_class_labels.append("unknown")
                 
                 result = {
                     'points': np.array(first_closest_points),
@@ -1066,9 +1109,10 @@ class SLAMOutputVisualizer:
                     'data_type': data_type
                 }
                 
-                # Add segment IDs if this is objects data
+                # Add segment IDs and class labels if this is objects data
                 if data_type == 'objects':
                     result['segment_ids'] = np.array(first_segment_ids)
+                    result['class_labels'] = np.array(first_class_labels)
                 
                 return result
         
@@ -1134,10 +1178,13 @@ class SLAMOutputVisualizer:
                 distance = closest_points_data['distances'][i]
                 data_type = closest_points_data.get('data_type', 'points')
                 
-                # Get segment ID if available
+                # Get segment ID and class label if available
                 segment_id = None
+                class_label = None
                 if 'segment_ids' in closest_points_data and i < len(closest_points_data['segment_ids']):
                     segment_id = closest_points_data['segment_ids'][i]
+                if 'class_labels' in closest_points_data and i < len(closest_points_data['class_labels']):
+                    class_label = closest_points_data['class_labels'][i]
                 
                 # Check if this pose has valid closest point data
                 has_valid_data = True
@@ -1156,9 +1203,9 @@ class SLAMOutputVisualizer:
                     if self.config['enable_directional_warnings']:
                         direction = self._calculate_direction_to_point(position, quaternion, closest_point)
                     
-                    # Generate warning message (now includes segment info)
+                    # Generate warning message (now includes segment info and class label)
                     warning_message = self._generate_warning_message(
-                        distance, direction, warning_level, data_type, segment_id
+                        distance, direction, warning_level, data_type, segment_id, class_label
                     )
                     
                     # Get warning-appropriate colors and styling
@@ -1838,20 +1885,26 @@ class SLAMOutputVisualizer:
     
     def _generate_warning_message(self, distance: float, direction: str, 
                                 warning_level: str, data_type: str = 'points', 
-                                segment_id: Optional[int] = None) -> str:
+                                segment_id: Optional[int] = None, class_label: Optional[str] = None) -> str:
         """Generate appropriate warning message based on context."""
         if not self.config['enable_warnings']:
             if segment_id is not None and segment_id >= 0:
-                return f"Distance: {distance:.3f}m (Segment {segment_id})"
+                if class_label and class_label != "unknown":
+                    return f"Distance: {distance:.3f}m ({class_label} #{segment_id})"
+                else:
+                    return f"Distance: {distance:.3f}m (Segment {segment_id})"
             else:
                 return f"Distance: {distance:.3f}m"
         
         # Format distance
         distance_str = f"{distance:.2f}m"
         
-        # Create object/point descriptor
+        # Create object/point descriptor with class label
         if data_type == 'objects' and segment_id is not None and segment_id >= 0:
-            object_descriptor = f"Object #{segment_id}"
+            if class_label and class_label != "unknown":
+                object_descriptor = f"{class_label} #{segment_id}"
+            else:
+                object_descriptor = f"Object #{segment_id}"
         elif data_type == 'objects':
             object_descriptor = "Object"
         else:

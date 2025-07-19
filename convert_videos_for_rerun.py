@@ -126,8 +126,8 @@ class VideoConverter:
     
     def convert_video(self, input_path: Path, output_path: Path) -> bool:
         """Convert video to rerun-compatible format."""
-        print(f"Converting (overwriting): {input_path.name}")
-        # Use temporary file when overwriting original
+        print(f"Converting: {input_path.name} -> {output_path.name}")
+        # Use temporary file during conversion
         temp_output = input_path.parent / f".{input_path.stem}_temp_convert.mp4"
         
         # FFmpeg command for maximum rerun compatibility
@@ -167,10 +167,16 @@ class VideoConverter:
                     temp_output.unlink()  # Clean up temp file
                 return False
             
-            # Replace the original file
-            input_path.unlink()  # Remove original
-            temp_output.rename(input_path)  # Rename temp to original
-            print(f"  ✅ Conversion successful (original overwritten)")
+            # Move temp file to final output location
+            if output_path.exists():
+                output_path.unlink()  # Remove existing output if it exists
+            temp_output.rename(output_path)  # Rename temp to final output
+            
+            # Remove original file if it's different from output
+            if input_path != output_path and input_path.exists():
+                input_path.unlink()
+            
+            print(f"  ✅ Conversion successful -> {output_path.name}")
             
             return True
             
@@ -181,8 +187,8 @@ class VideoConverter:
             return False
     
     def get_output_path(self, input_path: Path) -> Path:
-        """Return the same path since we always overwrite."""
-        return input_path
+        """Generate output path with .mp4 extension."""
+        return input_path.with_suffix('.mp4')
     
     def should_convert(self, input_path: Path, output_path: Path, analysis: Dict[str, Any]) -> bool:
         """Determine if conversion should be performed."""
@@ -250,7 +256,8 @@ class VideoConverter:
         print(f"  📁 Total processed: {len(video_files)}")
         
         if converted_count > 0:
-            print(f"\nOriginal videos have been overwritten with rerun-compatible versions.")
+            print(f"\nVideos have been converted to rerun-compatible MP4 format.")
+            print("Original non-MP4 files have been replaced with MP4 versions.")
             print("You can now use these videos with the SLAM visualizer.")
 
 
