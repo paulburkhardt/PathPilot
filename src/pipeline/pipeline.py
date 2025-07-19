@@ -77,21 +77,17 @@ class Pipeline:
                 **data_entity  
             })
 
-            for component in self.components[1:]:
-
-                # stop the timer before the enhanced_output_writer
-                # Calculate and log total pipeline execution time
-                if component.__class__.__name__ == "EnhancedSLAMOutputWriter":
-                    pipeline_end_time = time.time()
-                    total_duration = pipeline_end_time - pipeline_start_time
+            for component in self.components[1:]:                    
 
                 inputs = bucket.get(*component.inputs_from_bucket)
                 outputs = component(**inputs)
                 bucket.put(outputs)
 
                     
-                    
-                
+        # Calculate and log total pipeline execution time
+                        
+        pipeline_end_time = time.time()
+        total_duration = pipeline_end_time - pipeline_start_time                
         
         print(f"✅ Pipeline execution completed at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(pipeline_end_time))}")
         print(f"⏱️  Total pipeline execution time: {self._format_duration(total_duration)}")
