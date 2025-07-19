@@ -54,6 +54,11 @@ class VideoPlayer():
         else:
             return np.zeros((256,256,3))
 
+    @property
+    def step_idx(self):
+        SUBSAMPLING_RATE = 2
+        return self.frame_idx//SUBSAMPLING_RATE
+
     def __play_loop(self):
 
         while self.is_playing and self.frame_idx < len(self.video_frames):

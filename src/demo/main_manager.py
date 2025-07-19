@@ -21,19 +21,19 @@ class MainManager():
         self.is_playing = False
 
     @property
-    def frame_idx(self):
+    def step_idx(self):
         """
-        The Video player is the determining factor for the current frame
+        The Video player is the determining factor for the current step
         """
-        return self.video_player.frame_idx
+        return self.video_player.step_idx
     
     @property
     def camera_pose(self):
-        return self.data_manager.get_frame_data(self.frame_idx)[0]
+        return self.data_manager.get_frame_data(self.step_idx)[0]
     
     @property
     def objects(self):
-        return self.data_manager.get_frame_data(self.frame_idx)[1]
+        return self.data_manager.get_frame_data(self.step_idx)[1]
 
     def load_data(
             self,
@@ -89,11 +89,13 @@ class MainManager():
                               closest_obj.closest_3d_z])
             
             # Get object position in camera coordinates
-            obj_cam = camera_pose.transform_point(obj_pos)
+            obj_cam = camera_pose.world_to_cam(obj_pos)
             is_left = obj_cam[0] < 0  # x-coordinate determines left/right
             
             # Play appropriate warning sound
             self.audio_player.set_state(closest_obj.closest_2d_distance, is_left)
+        else:
+            self.audio_player.set_state(float("inf"),True)
 
     def record_user_audio_and_transcribe(
         self
@@ -118,9 +120,11 @@ class MainManager():
         if camera_pose is not None and not objects.empty:
             descriptions = []
             for _, obj in objects.iterrows():
+                
                 obj_pos = np.array([obj.closest_3d_x, obj.closest_3d_y, obj.closest_3d_z])
-                pos_cam = camera_pose.transform_point(obj_pos)
-                direction = self._get_direction(pos_cam)
+                direction = camera_pose.world_to_string_direction(
+                    obj_pos
+                )
                 
                 descriptions.append(
                     f"A {obj.class_label.lower()} at {obj.closest_2d_distance:.1f} meters to your {direction}"
@@ -130,39 +134,3 @@ class MainManager():
             self.audio_player.speak_text(scene_description)
         else:
             self.audio_player.speak_text("There are no objects in close proximity.")
-
-    def _get_direction(self, vec_cam) -> str:
-        """
-        Determines the direction of the object relative to the camera position and orientation.
-
-        Args:
-            vec_cam: vector in camera frame
-        Returns:
-            Direction string: "front", "right", "left", "back", "front-right",
-            "front-left", "back-left", or "back-right".
-        """
-        
-        # In camera coordinates:
-        # x points right
-        # y points down
-        # z points forward
-        x, z = vec_cam[0], vec_cam[2]  # project onto xz plane
-        angle = np.arctan2(x, z) * 180 / np.pi  # angle in degrees
-
-        # Return direction based on angle
-        if -22.5 <= angle < 22.5:
-            return "front"
-        elif 22.5 <= angle < 67.5:
-            return "front-right"
-        elif 67.5 <= angle < 112.5:
-            return "right"
-        elif 112.5 <= angle < 157.5:
-            return "back-right"
-        elif angle >= 157.5 or angle < -157.5:
-            return "back"
-        elif -157.5 <= angle < -112.5:
-            return "back-left"
-        elif -112.5 <= angle < -67.5:
-            return "left"
-        else:  # -67.5 <= angle < -22.5
-            return "front-left"
