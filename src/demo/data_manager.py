@@ -27,6 +27,12 @@ class DataManager():
         df = df.loc[df.groupby(['segment_id', 'step'])['closest_2d_distance'].idxmin()]
         self.objects_df = df.sort_values(by='step').reset_index(drop=True)
 
+        #filter out background
+        self.objects_df = self.objects_df.loc[self.objects_df.class_label != "background"]
+
+        #clean classlabels
+        self.objects_df.class_label = self.objects_df.class_label.apply(lambda x: x if ":" not in x else x.split(":",1)[0])
+
         # Load floor plane data
         floor_df = pd.read_csv(data_dir / "incremental_analysis_detailed_floor_data.csv")
         if not floor_df.empty:
@@ -56,6 +62,79 @@ class DataManager():
         camera_pose = self.trajectory.get(step_idx)
         frame_objects = self.objects_df[self.objects_df.step == step_idx]
         return camera_pose, frame_objects
+
+    def plot_step_static(self, step_idx: int, axis_length: float = 0.5):
+        """Generate and return a filepath to a static 3D plot of the given step."""
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+        import tempfile
+        import uuid
+
+        pose, objects = self.get_frame_data(step_idx)
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Draw camera trajectory
+        positions = np.array([p.position for p in self.trajectory.values()])
+        ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], color='black', label='Trajectory')
+
+        # Draw floor
+        if self.floor_plane:
+            normal, offset = self.floor_plane
+            normal = normal / np.linalg.norm(normal)
+
+            mid = positions.mean(axis=0)
+            max_range = (positions.max(axis=0) - positions.min(axis=0)).max() / 2
+            plane_size = max_range * 2
+            xx, yy = np.meshgrid(
+                np.linspace(mid[0] - plane_size, mid[0] + plane_size, 20),
+                np.linspace(mid[1] - plane_size, mid[1] + plane_size, 20)
+            )
+            zz = (-normal[0] * xx - normal[1] * yy - offset) / normal[2]
+            ax.plot_surface(xx, yy, zz, alpha=0.3, color='cyan')
+
+            # Set view to top-down
+            def view_angles_from_normal(n):
+                n = -n / np.linalg.norm(n)
+                elev = np.arcsin(n[2])
+                azim = np.arctan2(n[1], n[0])
+                return np.degrees(elev), np.degrees(azim)
+
+            elev, azim = view_angles_from_normal(normal)
+            ax.view_init(elev=elev, azim=azim)
+
+        if pose:
+            pos = pose.position
+            ax.scatter(pos[0], pos[1], pos[2], color='blue', s=60)
+
+            rot = pose.rotation.as_matrix()
+            for i, color in enumerate(['r', 'g', 'b']):
+                end = pos + rot[:, i] * axis_length
+                ax.plot([pos[0], end[0]], [pos[1], end[1]], [pos[2], end[2]], color=color, linewidth=2)
+
+        if not objects.empty:
+            xs = objects.closest_3d_x.values
+            ys = objects.closest_3d_y.values
+            zs = objects.closest_3d_z.values
+            ax.scatter(xs, ys, zs, color='orange', s=30)
+            for x, y, z, label in zip(xs, ys, zs, objects.class_label.values):
+                point = np.array([x, y, z])
+                dir_str = pose.world_to_string_direction(point)
+                ax.text(x, y, z, f"{label}\n({dir_str})", size=8, color='purple')
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.set_title(f"Step {step_idx}")
+        ax.grid(True)
+
+        # Save to file
+        temp_path = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}.png"
+        plt.tight_layout()
+        plt.savefig(temp_path)
+        plt.close(fig)
+
+        return str(temp_path)
 
     
 
@@ -193,8 +272,8 @@ class DataManager():
 if __name__ == "__main__":
     dm = DataManager()
     dm.load_data(
-        Path(r"C:\Users\nick\OneDrive\Dokumente\Studium\TUM\Master\Semester2\AppliedFoundationModels\work\PathPilot\Data\evaluation\evaluation\outdoor_1\run_279\incremental_analysis_detailed_20250718_232931")
-        #Path(r"C:\Users\nick\OneDrive\Dokumente\Studium\TUM\Master\Semester2\AppliedFoundationModels\work\PathPilot\Data\evaluation\evaluation\two_chairs_and_trash\run_278\incremental_analysis_detailed_20250718_224557")
+        #Path(r"C:\Users\nick\OneDrive\Dokumente\Studium\TUM\Master\Semester2\AppliedFoundationModels\work\PathPilot\Data\evaluation\evaluation\outdoor_1\run_279\incremental_analysis_detailed_20250718_232931")
+        Path(r"C:\Users\nick\OneDrive\Dokumente\Studium\TUM\Master\Semester2\AppliedFoundationModels\work\PathPilot\Data\run_bonus_stage_two_chairs_and_trash\incremental_analysis_detailed_20250718_224557")
     )
 
     DataManager.plot_camera_trajectory_with_step_slider(dm.trajectory, dm.objects_df, floor_plane=dm.floor_plane,axis_length=0.5)

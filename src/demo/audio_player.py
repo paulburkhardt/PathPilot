@@ -139,6 +139,7 @@ class AudioPlayer:
              if self.beep is not None:
                 if self.interval == float("inf"):
                     pass
+                    time.sleep(0.01)
                 elif self.interval == 0.0:
                     self.beep.play()
                 else:

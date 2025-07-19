@@ -3,8 +3,9 @@ import os
 from pathlib import Path
 from main_manager import MainManager
 
-# Hardcoded base directory
+
 BASE_DIR = r"C:\Users\nick\OneDrive\Dokumente\Studium\TUM\Master\Semester2\AppliedFoundationModels\work\PathPilot\Data"
+ENABLE_3D_PLOT = False
 
 
 def validate_directory(path):
@@ -83,12 +84,26 @@ def main():
 
             with gr.TabItem("🧠 AI Interaction", id=1, visible=False) as ai_tab:
                 with gr.Row():
-                    frame_display = gr.Image(
-                        value=manager.video_player.get_current_frame,
-                        every=0.01,
-                        visible=False,
-                        label="🎞️ Live Frame Preview"
-                    )
+                    with gr.Column():
+                        frame_display = gr.Image(
+                            value=manager.video_player.get_current_frame,
+                            every=0.01,
+                            visible=False,
+                            label="🎞️ Live Frame Preview"
+                        )
+                        if ENABLE_3D_PLOT:
+                            # NEW: static 3D plot
+                            def get_static_plot():
+                                if manager.data_manager.data_loaded:
+                                    return manager.data_manager.plot_step_static(manager.video_player.step_idx)
+                                else:
+                                    return None
+                            static_plot = gr.Image(
+                                value=get_static_plot,
+                                every=0.01,
+                                visible=False,
+                                label="📍 3D Scene (Current Step)"
+                            )
 
                     with gr.Column():
                         toggle_btn = gr.Button("▶️ Play / ⏸️ Pause", visible=False)
@@ -117,6 +132,7 @@ def main():
 
         # Bindings
         video_file.change(fn=manager.load_video, inputs=video_file, outputs=[])
+
         explain_scene_btn.click(fn=manager.explain_scene)
 
         def toggle_manager():
@@ -137,29 +153,21 @@ def main():
 
         def load_data_with_feedback(path):
             success = manager.load_data(path)
+            num_values = 8
+            if ENABLE_3D_PLOT:
+                num_values +=1
+            updates = []
+            for i in range(num_values):
+                updates.append(gr.update(visible=success))
             if success:
                 return (
                     gr.update(value="✅ Data loaded! Proceed to the AI Interaction tab.", elem_classes="success"),
-                    gr.update(visible=True),
-                    gr.update(visible=True),
-                    gr.update(visible=True),
-                    gr.update(visible=True),
-                    gr.update(visible=True),
-                    gr.update(visible=True),
-                    gr.update(visible=True),
-                    gr.update(visible=True)
+                    *updates
                 )
             else:
                 return (
                     gr.update(value="❌ Failed to load data. Please check the selected directory.", elem_classes="error"),
-                    gr.update(visible=False),
-                    gr.update(visible=False),
-                    gr.update(visible=False),
-                    gr.update(visible=False),
-                    gr.update(visible=False),
-                    gr.update(visible=False),
-                    gr.update(visible=False),
-                    gr.update(visible=False)
+                    *updates
                 )
 
         submit_btn.click(
@@ -174,7 +182,19 @@ def main():
                 spatial_gpt_prompt,
                 spatial_gpt_output,
                 spatial_gpt_speech_state,
-                ai_tab  # tab visibility
+                ai_tab,  # tab visibility
+                static_plot
+            ] if ENABLE_3D_PLOT else
+            [
+                feedback,
+                frame_display,
+                toggle_btn,
+                explain_scene_btn,
+                spatial_gpt_btn,
+                spatial_gpt_prompt,
+                spatial_gpt_output,
+                spatial_gpt_speech_state,
+                ai_tab,  # tab visibility
             ]
         )
 

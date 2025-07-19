@@ -70,18 +70,18 @@ class SpatialAIManager:
             camera_pose_as_text = "{position: "+ str(camera_pose.position.tolist())+", quaternion: "+ str(camera_pose.rotation.as_quat().tolist()) + " }"
 
         print("Asking Spatial AI...")
-        output = "Dummy output"
-        #response = self.client.responses.parse(
-        #            model="gpt-4o-2024-08-06",
-        #            input=[
-        #                {"role": "system", "content": system_prompt},
-        #                {
-        #                    "role": "user",
-        #                    "content": "PROMPT: "+ prompt +"\n" +"CAMERA POSE: "+ camera_pose_as_text + "\n" + "OBJECTS: " + objects_as_text ,
-        #                },
-        #            ]
-        #        )
-        #output = response.output_text
+        #output = "Dummy output"
+        response = self.client.responses.parse(
+                    model="gpt-4o-2024-08-06",
+                    input=[
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": "PROMPT: "+ prompt +"\n" +"CAMERA POSE: "+ camera_pose_as_text + "\n" + "OBJECTS: " + objects_as_text ,
+                        },
+                    ]
+                )
+        output = response.output_text
         print("Done.")
 
         return output

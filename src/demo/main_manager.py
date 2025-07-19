@@ -127,7 +127,7 @@ class MainManager():
                 )
                 
                 descriptions.append(
-                    f"A {obj.class_label.lower()} at {obj.closest_2d_distance:.1f} meters to your {direction}"
+                    f"A {obj.class_label.lower()} at {obj.closest_2d_distance:.1f} meters {direction}"
                 )
             
             scene_description = ". ".join(descriptions) + "."
