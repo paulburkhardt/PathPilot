@@ -44,11 +44,15 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
         self.text = text
         self.max_tokens = max_tokens
         self.add_description = add_description
+
+        self.embeddings = {}
+        self.descriptions = {}
+        self.embedding_keys_int = set()
     
     @property
     def inputs_from_bucket(self) -> List[str]:
         """This component requires images and masks as input."""
-        return ["image","image_segmentation_mask","key_frame_flag"]
+        return ["image","image_segmentation_mask","key_frame_flag", "segmentation_mask_images"]
     
     @property
     def outputs_to_bucket(self) -> List[str]:
@@ -57,7 +61,7 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
     
 
 
-    def _run(self, image: Any, image_segmentation_mask, key_frame_flag, **kwargs: Any) -> Dict[str, Any]:
+    def _run(self, image: Any, image_segmentation_mask, key_frame_flag,segmentation_mask_images, **kwargs: Any) -> Dict[str, Any]:
         """
         Process an image with image_segmentation_mask to generate embeddings and descriptions.
         
@@ -74,33 +78,70 @@ class ImageEmbeddingSegmenter(AbstractDataSegmenter):
             "embeddings": None,
             "descriptions": None
             }
+        
+        masks = image_segmentation_mask.as_binary_dict()
+        # Get all unique IDs present in all segmentation mask images
+        all_segmentation_ids = np.unique(segmentation_mask_images)
+        # Remove the 0 id if it exists (commonly background)
+        all_segmentation_ids = all_segmentation_ids[all_segmentation_ids != 0]
+        # Convert mask and embedding keys to sets of ints (efficient, only once)
+        mask_keys_int = set(map(int, masks.keys()))
+        num_frames = segmentation_mask_images.shape[0]
+        for frame_idx in range(num_frames):
+            frame_ids = np.unique(segmentation_mask_images[frame_idx])
+            frame_ids = frame_ids[frame_ids != 0]  # skip background
+            for id_in_frame in frame_ids:
+                if id_in_frame not in mask_keys_int and id_in_frame not in self.embedding_keys_int:
+                    binary_mask = (segmentation_mask_images[frame_idx] == id_in_frame).astype(np.uint8)
+                    if np.any(binary_mask):
+                        masks[id_in_frame] = binary_mask
 
-        embeddings = {}
-        descriptions = {}
+        # Optionally, use or print these sets as needed
+        # print(f"IDs in masks: {ids_in_masks}")
+        # print(f"IDs in embeddings: {ids_in_embeddings}")
+        # print(f"IDs not in masks: {ids_not_in_masks}")
+        # print(f"IDs not in embeddings: {ids_not_in_embeddings}")
 
-        for mask_key, mask in image_segmentation_mask.as_binary_dict().items():
-            processed_image = self.apply_mask_and_blur(image, mask)
-            processed_image_pil = Image.fromarray(processed_image)
-            generated_caption, embedding = self.image_information_extraction(processed_image_pil, mask)
-            embeddings[mask_key] = embedding
-            descriptions[mask_key] = generated_caption
+        if not masks:
+            return {
+            "embeddings": None,
+            "descriptions": None
+            }
 
-        return {
-            "embeddings": embeddings,
-            "descriptions": descriptions
-        }
-    
-    def apply_mask_and_blur(self, image: np.ndarray, mask: np.ndarray):
-        # Convert image to numpy array if it's not already
+        # Downscale the image to match the mask shape if needed (do this once before the loop)
         rgb_image = image.as_numpy()
+
         # Convert normalized float image [0,1] to 0-255 uint8 if needed
         if rgb_image.dtype in [np.float32, np.float64] and rgb_image.max() <= 1.0:
             rgb_image = (rgb_image * 255).clip(0, 255).astype(np.uint8)
         elif rgb_image.dtype != np.uint8:
             rgb_image = np.clip(rgb_image, 0, 255).astype(np.uint8)
         
-        blur = cv2.GaussianBlur(rgb_image, (51, 51), 0)
-        focused = np.where(mask[..., None], rgb_image, blur)
+
+        for mask_key, mask in masks.items():
+            # Resize mask to match image shape if needed
+            if mask.shape != rgb_image.shape[:2]:
+                mask = cv2.resize(mask.astype(np.uint8), (rgb_image.shape[1], rgb_image.shape[0]), interpolation=cv2.INTER_NEAREST)
+            # Skip if mask is all zeros
+            if np.all(mask == 0):
+                continue
+            processed_image = self.apply_mask_and_blur(rgb_image, mask)
+            processed_image_pil = Image.fromarray(processed_image)
+            generated_caption, embedding = self.image_information_extraction(processed_image_pil, mask)
+            self.embeddings[mask_key] = embedding
+            self.descriptions[mask_key] = generated_caption
+            self.embedding_keys_int.add(int(mask_key))
+
+        return {
+            "embeddings": self.embeddings,
+            "descriptions": self.descriptions
+        }
+    
+    def apply_mask_and_blur(self, image: np.ndarray, mask: np.ndarray):
+        # Convert image to numpy array if it's not already
+
+        blur = cv2.GaussianBlur(image, (51, 51), 0)
+        focused = np.where(mask[..., None], image, blur)
         return focused
     
 

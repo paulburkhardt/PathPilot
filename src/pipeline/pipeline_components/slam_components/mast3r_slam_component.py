@@ -313,7 +313,10 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
     @property
     def outputs_to_bucket(self) -> List[str]:
         """This component outputs point clouds and camera poses."""
-        return ["point_cloud", "camera_pose", "key_frame_flag"]
+        output = ["point_cloud", "camera_pose", "key_frame_flag"]
+        if self.segment_point_cloud:
+            output.append("segmentation_mask_images")
+        return output
 
     def _init_mast3r_slam(
             self,
@@ -459,7 +462,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
 
 
 
-
+        segmentation_mask_images = []
         key_frame_flag = add_new_kf or init_kf
 
         #project the keyframes onto the current pointcloud
@@ -494,7 +497,9 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
                 confidence_scores.append(score[valid])
 
                 if self.segment_point_cloud:
-                    seg_mask = keyframe.img_segmentation_mask.cpu().numpy().astype(np.uint8).reshape(-1)
+                    segmentation_mask = keyframe.img_segmentation_mask.cpu().numpy().astype(np.uint8)
+                    segmentation_mask_images.append(segmentation_mask)
+                    seg_mask = segmentation_mask.reshape(-1)
                     segmentation_masks.append(seg_mask[valid])
 
             pointclouds = np.concatenate(pointclouds, axis=0)
@@ -502,6 +507,7 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             confidence_scores = np.concatenate(confidence_scores, axis=0)
             if self.segment_point_cloud:
                 segmentation_masks = np.concatenate(segmentation_masks,axis=0)
+                segmentation_mask_images = np.stack(segmentation_mask_images, axis=0)
 
         #update the pointcloud with every frame, but only have parts of the color
         elif self.point_cloud_method == "refreshing" and ( not self.only_keyframes or (self.only_keyframesand and key_frame_flag)):
@@ -542,8 +548,13 @@ class MAST3RSLAMComponent(AbstractSLAMComponent):
             segmentation_mask = segmentation_masks
         )
 
-        return {
+        output =  {
             "point_cloud": point_cloud_data_entity,
             "camera_pose": T_WC,
             "key_frame_flag": key_frame_flag
         }
+
+        if self.segment_point_cloud:
+            output["segmentation_mask_images"] =  segmentation_mask_images
+        
+        return output

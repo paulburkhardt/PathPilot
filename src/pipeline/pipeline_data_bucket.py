@@ -53,7 +53,8 @@ class PipelineDataBucket:
         "object_dict",
 
         "descriptions",
-        "embeddings"
+        "embeddings",
+        "segmentation_mask_images"
 
         
     ]

@@ -3,7 +3,7 @@ pipeline:
     # Load video data for SLAM processing
     - type: MAST3RSLAMVideoDataset
       config:
-        video_path: evaluation/two_chairs_and_trash/two_chairs_and_trash.mp4
+        video_path: evaluation/back_and_forth/back_and_forth.mp4
         mast3r_slam_config_path: "configs/MASt3R-SLAM_configs/no_calib.yaml"
 
     # Run the yolo segmenter
@@ -49,12 +49,12 @@ pipeline:
 
     - type: BBoxObjectDatabase
       config: 
-        match_threshold : 0.4 # the higher the more matching happens
+        match_threshold : 0.4  # the higher the more matching happens
         embedding_weight : 0.4 # interpolation weight between geometric distance and similar. Higher value means similarity is more important
         running_embedding_weight  :  0.7 # how the running embedding get updated. higher value -> gets lets changed by new similar image
         knn_count  :  4 # controls how many options there are 
         use_blip  :  True # look if images are similar
-        use_fusion  :  False # to join existing objects if needed # implemented but not tested for a while
+        use_fusion  :  True # to join existing objects if needed # implemented but not tested for a while
         enable_same_mask_tracking : False # leave at false. this is for yolo and accumulating mode of Mast3r-slam important
         track_points: True # the pointclouds are actually not needed, but for nice visualisation i intregated it
 
@@ -72,25 +72,25 @@ pipeline:
     # Find closest points incrementally - waits for floor detection
     - type: IncrementalClosestPointFinderComponent
       config:
-        use_view_cone: true  # Set to true to enable view cone filtering
+        use_view_cone: False  # Set to true to enable view cone filtering
         cone_angle_deg: 45.0
         use_segmentation_filter: False  # Enable filtering based on segmentation masks
         use_object_segmentation_filter: True # either use_segmentation_filter or use_object_segmentation_filter
         use_centroids: False 
-        n_closest_points: 4  # Number of closest points to return
+        n_closest_points: 4  # Number of closest points to return #this is not needed for use_object_segmentation_filter
     # Enhanced output writer with intermediate saving enabled
 
-    # - type: EnhancedSLAMOutputWriter
-    #   config:
-    #     output_dir: "enhanced_slam_outputs"
-    #     output_name: "incremental_analysis_detailed"
-    #     save_point_cloud: true
-    #     save_trajectory: true
-    #     save_floor_data: true
-    #     save_closest_points: true
-    #     save_yolo_detections: true  # Save YOLO detection results
-    #     save_intermediate: true  # Save intermediate results
-    #     intermediate_interval: 10   # Save intermediate results every 5 frames
-    #     create_timestamped_dir: true
-    #     analysis_format: "csv"  # Can be "json" or "csv" 
-    #     save_closest_points_segment_ids: true  # Save segment IDs for closest points 
+    - type: EnhancedSLAMOutputWriter
+      config:
+        output_dir: "enhanced_slam_outputs"
+        output_name: "incremental_analysis_detailed"
+        save_point_cloud: true
+        save_trajectory: true
+        save_floor_data: true
+        save_closest_points: true
+        save_yolo_detections: true  # Save YOLO detection results
+        save_intermediate: true  # Save intermediate results
+        intermediate_interval: 10   # Save intermediate results every 5 frames
+        create_timestamped_dir: true
+        analysis_format: "csv"  # Can be "json" or "csv" 
+        save_closest_points_segment_ids: true  # Save segment IDs for closest points 
