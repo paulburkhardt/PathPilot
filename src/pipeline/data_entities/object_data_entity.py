@@ -26,7 +26,7 @@ class ObjectDataEntity(AbstractDataEntity):
 
         self.cum_sum = np.sum(points_3D,axis= 0).astype(float) 
         self.cum_len = points_3D.shape[0]
-        self.original_len = points_3D.shape[0]
+        self.original_volume = self.volume_aabb(self.aabb) 
 
         self.track_points = track_points
         if self.track_points:
@@ -45,10 +45,13 @@ class ObjectDataEntity(AbstractDataEntity):
         self.mask_id.add(mask_id)
         new_points  = new_point_cloud.as_numpy()
 
+        new_aabb = self.get_aabb(new_points)
+        new_volume = self.volume_aabb(new_aabb) 
         new_len = new_points.shape[0] 
-        if new_len  > self.original_len:
+
+        if new_volume  > self.original_volume:
             self.description = description
-            self.original_len = new_len
+            self.original_volume = new_volume
 
         self.cum_sum += np.sum(new_points, axis= 0).astype(float) 
         self.cum_len += new_len
@@ -57,7 +60,7 @@ class ObjectDataEntity(AbstractDataEntity):
             self.points = PointCloudDataEntity.vstack(self.points,new_point_cloud)
 
         self.centroid = self.cum_sum / self.cum_len
-        self.aabb = self.update_aabb(self.aabb,self.get_aabb(new_points))
+        self.aabb = self.update_aabb(self.aabb, new_aabb)
 
         if self.embeddings is not None: 
             self.running_embedding =  self.running_embedding_weight * self.running_embedding + (1 - self.running_embedding_weight) * new_embedding
@@ -72,9 +75,9 @@ class ObjectDataEntity(AbstractDataEntity):
     def fuse(self, obj):
         self.mask_id.update(obj.mask_id)
         
-        if obj.original_len > self.original_len:
+        if obj.original_volume > self.original_volume:
             self.description = obj.description
-            self.original_len = obj.original_len
+            self.original_volume = obj.original_volume
 
         self.cum_sum += obj.cum_sum
         self.cum_len += obj.cum_len
@@ -101,3 +104,6 @@ class ObjectDataEntity(AbstractDataEntity):
             min(aabb1[2], aabb2[2]), max(aabb1[3], aabb2[3]),
             min(aabb1[4], aabb2[4]), max(aabb1[5], aabb2[5])
         )  
+    
+    def volume_aabb(self, aabb):
+        return abs(aabb[1] - aabb[0]) * abs(aabb[3] - aabb[2]) * abs(aabb[5] - aabb[4]) 

@@ -33,6 +33,7 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
         self.rewrite_pointcloud = rewrite_pointcloud
         self.backround = None
         self.do_DBSCAN = do_DBSCAN
+        self.mask_tracker = set()
     
     @property
     def inputs_from_bucket(self) -> List[str]:
@@ -86,12 +87,12 @@ class PointCloudFilterSegmenter(AbstractDataSegmenter):
 
             points = arr[:, :-1]
 
-            if obj_id == 0 and not self.ignore_backround: #NOTE its good to do this since we also dont have a mask for it
+            if obj_id == 0 and not self.ignore_backround  or obj_id in self.mask_tracker : #NOTE its good to do this since we also dont have a mask for it
                 self.backround = self.create_pointcloud_entity(arr)  
                 continue
-
             # Remove all-zero points
             if len(points) > 0:
+                self.mask_tracker.add(obj_id)
                 if self.do_DBSCAN:
 
                     db = DBSCAN(eps= self.neighbor_distance, min_samples=5).fit(points[:,:3])
