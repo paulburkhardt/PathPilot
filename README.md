@@ -2,6 +2,10 @@
 
 A standalone Python script for visualizing SLAM (Simultaneous Localization and Mapping) pipeline outputs using the rerun-sdk. This tool provides an interactive 3D visualization of point clouds, camera trajectories, floor detection, closest point analysis, and video synchronization.
 
+<p align="center">
+  <img src="assets/out_door_example.gif" width="65%" title="Outdoor Demo">
+</p>
+
 ## Features
 
 ### 🎯 Core Visualization

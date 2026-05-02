@@ -29,3 +29,5 @@ enhanced_slam_outputs/
 
 sam2/
 MASt3R-SLAM/
+
+!assets/*.gif
